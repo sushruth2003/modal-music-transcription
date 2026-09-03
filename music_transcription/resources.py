@@ -21,6 +21,7 @@ from music_transcription.config import (
     MODEL_VOLUME_NAME,
     MULTIPART_PACKAGE,
     PYTHON_VERSION,
+    WEB_SECRET_NAME,
 )
 
 FRONTEND_SOURCE_PATH = Path(__file__).parent / "frontend"
@@ -31,6 +32,7 @@ model_volume = modal.Volume.from_name(MODEL_VOLUME_NAME, create_if_missing=True)
 artifact_volume = modal.Volume.from_name(ARTIFACT_VOLUME_NAME, create_if_missing=True)
 job_states = modal.Dict.from_name(JOB_DICT_NAME, create_if_missing=True)
 huggingface_secret = modal.Secret.from_name(HUGGINGFACE_SECRET_NAME)
+web_secret = modal.Secret.from_name(WEB_SECRET_NAME)
 
 download_image = (
     modal.Image.debian_slim(python_version=PYTHON_VERSION)

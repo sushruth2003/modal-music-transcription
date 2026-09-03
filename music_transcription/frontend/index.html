@@ -20,7 +20,10 @@
           </span>
           <span>MuScriptor <strong>Studio</strong></span>
         </a>
-        <span class="runtime"><span></span> Modal · L4</span>
+        <div class="topbar-actions">
+          <span class="runtime"><span></span> Modal · L4</span>
+          <button id="logout-button" class="logout-button" type="button" hidden>Sign out</button>
+        </div>
       </header>
 
       <main>
@@ -34,7 +37,37 @@
         </section>
 
         <section class="workspace" aria-label="Transcription workspace">
-          <form id="upload-form" class="upload-card">
+          <section id="auth-card" class="auth-card" aria-labelledby="auth-title">
+            <div class="auth-lock" aria-hidden="true">
+              <svg viewBox="0 0 24 24">
+                <path d="M7 10V7a5 5 0 0 1 10 0v3M6 10h12v10H6V10Zm6 4v2" />
+              </svg>
+            </div>
+            <p class="section-kicker">Private workspace</p>
+            <h2 id="auth-title">Enter your access code</h2>
+            <p class="auth-copy">
+              Uploads start paid GPU work. This workspace is locked so only invited people can
+              submit recordings or open results.
+            </p>
+            <form id="auth-form" class="auth-form">
+              <label for="access-token">Access code</label>
+              <div class="auth-input-row">
+                <input
+                  id="access-token"
+                  name="access_token"
+                  type="password"
+                  autocomplete="current-password"
+                  minlength="24"
+                  required
+                />
+                <button type="submit">Unlock</button>
+              </div>
+              <p id="auth-error" class="form-error" role="alert" hidden></p>
+            </form>
+            <p class="auth-note">The code becomes a secure, 12-hour browser session and is not saved in page storage.</p>
+          </section>
+
+          <form id="upload-form" class="upload-card" hidden>
             <div class="step-heading">
               <span class="step-number">01</span>
               <div>
@@ -80,7 +113,7 @@
             <p id="form-error" class="form-error" role="alert" hidden></p>
           </form>
 
-          <section id="job-card" class="job-card" aria-labelledby="job-heading">
+          <section id="job-card" class="job-card" aria-labelledby="job-heading" hidden>
             <div id="empty-state" class="empty-state">
               <div class="staff" aria-hidden="true">
                 <span></span><span></span><span></span><span></span><span></span>

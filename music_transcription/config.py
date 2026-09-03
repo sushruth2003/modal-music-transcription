@@ -39,6 +39,10 @@ WEB_TARGET_CONCURRENT_INPUTS = 10
 WEB_MAX_UPLOAD_BYTES = 100 * 1024 * 1024
 WEB_UPLOAD_CHUNK_BYTES = 1024 * 1024
 MAX_INSTRUMENT_HINTS = 16
+WEB_SECRET_NAME = "music-transcription-web-secret"
+WEB_ACCESS_TOKEN_ENV = "WEB_ACCESS_TOKEN"
+WEB_SESSION_COOKIE = "music_transcription_session"
+WEB_SESSION_SECONDS = 12 * 60 * 60
 
 # Modal's published L4 rate when this milestone was implemented. This is only
 # used for a clearly labelled inference-time estimate, not as a billing record.

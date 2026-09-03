@@ -9,6 +9,11 @@ from music_transcription import api
 from music_transcription.storage import initial_job_record
 
 JOB_ID = "a" * 32
+ACCESS_TOKEN = "test-access-token-with-32-characters"
+
+
+def auth_headers() -> dict[str, str]:
+    return {"Authorization": f"Bearer {ACCESS_TOKEN}"}
 
 
 def completed_record():
@@ -69,12 +74,14 @@ def test_submit_returns_accepted_job_handle(monkeypatch) -> None:
     }
     monkeypatch.setattr(api, "stage_uploaded_file", lambda *_args: (spec, 5))
     monkeypatch.setattr(api, "spawn_process_job", lambda _spec: "fc-123")
+    monkeypatch.setenv(api.WEB_ACCESS_TOKEN_ENV, ACCESS_TOKEN)
     client = TestClient(api.create_web_app())
 
     response = client.post(
         "/transcriptions",
         files={"audio": ("demo.wav", b"audio", "audio/wav")},
         data={"instruments": "piano"},
+        headers=auth_headers(),
     )
 
     assert response.status_code == 202
@@ -97,10 +104,11 @@ def test_status_and_piano_roll_endpoints(monkeypatch) -> None:
     )
     monkeypatch.setattr(api, "get_job", lambda _job_id: record)
     monkeypatch.setattr(api, "read_artifact_bytes", lambda _path: event_bytes)
+    monkeypatch.setenv(api.WEB_ACCESS_TOKEN_ENV, ACCESS_TOKEN)
     client = TestClient(api.create_web_app())
 
-    status = client.get(f"/transcriptions/{JOB_ID}")
-    roll = client.get(f"/transcriptions/{JOB_ID}/piano-roll")
+    status = client.get(f"/transcriptions/{JOB_ID}", headers=auth_headers())
+    roll = client.get(f"/transcriptions/{JOB_ID}/piano-roll", headers=auth_headers())
 
     assert status.status_code == 200
     assert status.json()["state"] == "completed"
@@ -128,3 +136,41 @@ def test_job_page_and_health_are_served() -> None:
     page = client.get(f"/jobs/{JOB_ID}")
     assert page.status_code == 200
     assert "MuScriptor Studio" in page.text
+
+
+def test_transcription_routes_require_authentication(monkeypatch) -> None:
+    monkeypatch.setenv(api.WEB_ACCESS_TOKEN_ENV, ACCESS_TOKEN)
+    client = TestClient(api.create_web_app())
+
+    status = client.get(f"/transcriptions/{JOB_ID}")
+    submit = client.post(
+        "/transcriptions",
+        files={"audio": ("demo.wav", b"audio", "audio/wav")},
+    )
+
+    assert status.status_code == 401
+    assert status.headers["www-authenticate"] == "Bearer"
+    assert submit.status_code == 401
+
+
+def test_browser_login_sets_secure_session_and_logout_clears_it(monkeypatch) -> None:
+    monkeypatch.setenv(api.WEB_ACCESS_TOKEN_ENV, ACCESS_TOKEN)
+    monkeypatch.setattr(api, "get_job", lambda _job_id: completed_record())
+    client = TestClient(api.create_web_app(), base_url="https://testserver")
+
+    rejected = client.post("/auth/session", json={"access_token": "wrong"})
+    login = client.post("/auth/session", json={"access_token": ACCESS_TOKEN})
+    authenticated = client.get("/auth/session")
+    status = client.get(f"/transcriptions/{JOB_ID}")
+    logout = client.delete("/auth/session")
+    signed_out = client.get(f"/transcriptions/{JOB_ID}")
+
+    assert rejected.status_code == 401
+    assert login.status_code == 200
+    assert "HttpOnly" in login.headers["set-cookie"]
+    assert "Secure" in login.headers["set-cookie"]
+    assert "SameSite=strict" in login.headers["set-cookie"]
+    assert authenticated.json() == {"authenticated": True}
+    assert status.status_code == 200
+    assert logout.status_code == 200
+    assert signed_out.status_code == 401
