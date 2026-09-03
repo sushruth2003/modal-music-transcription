@@ -1,0 +1,35 @@
+# Python and test caches
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Environments and local credentials
+.venv/
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# User audio and generated results
+data/*
+!data/README.md
+!data/synthetic-chords-30s.wav
+outputs/
+local-data/
+
+# Private development work products
+SPEC.md
+docs/
+notes/
+work/
+*.local.md
+
+# Editors and operating systems
+.DS_Store
+.idea/
+.vscode/
