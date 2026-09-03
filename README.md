@@ -49,7 +49,7 @@ The local download command retrieves `events.jsonl`, `transcription.mid`, and
 Clone the repository and install the small local dependency set:
 
 ```bash
-git clone <YOUR_REPOSITORY_URL> music-transcription
+git clone https://github.com/sushruth2003/modal-music-transcription.git music-transcription
 cd music-transcription
 uv sync --dev
 uv run modal setup
