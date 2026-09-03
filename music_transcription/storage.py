@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
+import io
+import json
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
 from music_transcription.config import ARTIFACT_MOUNT_PATH, SUPPORTED_AUDIO_SUFFIXES
-from music_transcription.resources import job_states
+from music_transcription.resources import artifact_volume, job_states
 from music_transcription.schemas import JobPaths, JobRecord, JobSpec, JobState
 
 
@@ -28,6 +30,15 @@ def new_job_spec(source_name: str, instruments: list[str] | None) -> JobSpec:
         "source_suffix": suffix,
         "instruments": instruments,
     }
+
+
+def parse_instruments(value: str | None) -> list[str] | None:
+    """Normalize comma-separated instrument hints from a CLI or form."""
+
+    if value is None:
+        return None
+    instruments = [item.strip() for item in value.split(",") if item.strip()]
+    return instruments or None
 
 
 def validate_job_id(job_id: str) -> str:
@@ -75,6 +86,23 @@ def initial_job_record(spec: JobSpec) -> JobRecord:
         "created_at": now,
         "updated_at": now,
     }
+
+
+def stage_job_sources(sources: list[Path], specs: list[JobSpec]) -> None:
+    """Commit source audio and immutable request metadata, then publish status."""
+
+    if len(sources) != len(specs):
+        raise ValueError("sources and specs must have the same length")
+
+    with artifact_volume.batch_upload() as batch:
+        for source, spec in zip(sources, specs, strict=True):
+            paths = job_paths(spec["job_id"], spec["source_suffix"])
+            request = json.dumps(spec, indent=2, sort_keys=True).encode() + b"\n"
+            batch.put_file(source, f"/{paths['source']}")
+            batch.put_file(io.BytesIO(request), f"/{paths['request']}")
+
+    for spec in specs:
+        job_states[spec["job_id"]] = initial_job_record(spec)
 
 
 def get_job(job_id: str) -> JobRecord:

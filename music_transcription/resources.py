@@ -5,18 +5,25 @@ checkpoint independently from those Images, and the Secret is attached only to
 the CPU downloader that needs it.
 """
 
+from pathlib import Path
+
 import modal
 
 from music_transcription.config import (
     APP_NAME,
     ARTIFACT_VOLUME_NAME,
+    FASTAPI_PACKAGE,
+    FRONTEND_MOUNT_PATH,
     HUGGINGFACE_HUB_PACKAGE,
     HUGGINGFACE_SECRET_NAME,
     JOB_DICT_NAME,
     MODEL_PACKAGE,
     MODEL_VOLUME_NAME,
+    MULTIPART_PACKAGE,
     PYTHON_VERSION,
 )
+
+FRONTEND_SOURCE_PATH = Path(__file__).parent / "frontend"
 
 app = modal.App(APP_NAME)
 
@@ -35,6 +42,13 @@ audio_image = (
     modal.Image.debian_slim(python_version=PYTHON_VERSION)
     .apt_install("ffmpeg")
     .add_local_python_source("music_transcription")
+)
+
+web_image = (
+    modal.Image.debian_slim(python_version=PYTHON_VERSION)
+    .uv_pip_install(FASTAPI_PACKAGE, MULTIPART_PACKAGE)
+    .add_local_python_source("music_transcription")
+    .add_local_dir(FRONTEND_SOURCE_PATH, remote_path=str(FRONTEND_MOUNT_PATH))
 )
 
 model_image = (

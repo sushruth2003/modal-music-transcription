@@ -1,6 +1,6 @@
 # MuScriptor on Modal
 
-Transcribe music into MIDI and timestamped note events with MuScriptor Large on Modal.
+Transcribe music into timestamped, instrument-aware notes and MIDI with MuScriptor Large on Modal.
 
 ## Quickstart
 
@@ -24,79 +24,77 @@ cp .env.example .env
 uv run modal secret create --from-dotenv .env huggingface-secret
 ```
 
-Download the pinned model weights once, then deploy the workers:
+Materialize the pinned model weights once, then deploy the workers and web app:
 
 ```bash
 uv run modal run -m music_transcription.models::download_model
 uv run modal deploy -m music_transcription.pipeline
 ```
 
-Run the included 30-second synthetic example:
+Modal prints the web URL after deployment. Open it to upload a WAV, FLAC, MP3,
+M4A, or OGG file (up to 100 MB), watch the durable job progress, compare the
+original audio with a browser-synthesized note preview, inspect the synchronized
+piano roll, and download MIDI. The upload endpoint is public in M2, so treat the
+deployment as a personal demo until authentication and rate limiting are added.
+
+The CLI remains useful for automation and batches:
 
 ```bash
 uv run python -m music_transcription.client submit \
   --audio data/synthetic-chords-30s.wav \
   --wait
-```
 
-The command prints a `job_id`. You can omit `--wait`, close the client, and check
-or download the durable result later:
+uv run python -m music_transcription.client submit-batch \
+  --directory local-data \
+  --limit 4
 
-```bash
 uv run python -m music_transcription.client status --job-id <job_id>
 uv run python -m music_transcription.client download --job-id <job_id>
 ```
 
-Submit up to four files from a directory with:
-
-```bash
-uv run python -m music_transcription.client submit-batch \
-  --directory local-data \
-  --limit 4
-```
-
-Supported inputs are WAV, FLAC, MP3, M4A, and OGG. Downloaded results are written
-to `outputs/<job_id>/`.
-
 ## Architecture
 
 ```text
-                                      Modal
-                         ┌────────────────────────────┐
-local client ── upload ─►│ artifact Volume           │
-     │                   │ source + generated files  │
-     │                   └─────────────┬──────────────┘
-     │ spawn JobSpec                   │ paths, not bytes
-     ▼                                 ▼
-deployed process_job ───────► CPU normalization with ffmpeg
-     │                                 │ commit normalized.wav
-     │                                 ▼
-     └──────────────────────► L4 MuScriptor inference
-                                       │ commit MIDI/events/metrics
-                                       ▼
-                              artifact Volume
-
-job status: submitted → preprocessing → transcribing → completed / failed
-                    stored in a persistent Modal Dict
+browser / CLI
+     │
+     │ POST audio                         GET status / audio / events / MIDI
+     ▼                                                   ▲
+┌────────────────────────────────────────────────────────────────────────┐
+│ CPU-only FastAPI ASGI Function                                         │
+│ stream to temporary disk → direct Volume upload → process_job.spawn()  │
+│ returns 202 + job_id immediately                                       │
+└──────────────────────────────┬─────────────────────────────────────────┘
+                               │ small JobSpec
+                               ▼
+                    CPU process_job Function
+                    ffmpeg → mono 16 kHz WAV
+                               │ commit + path reference
+                               ▼
+                    L4 MuScriptor GPU class
+                    pinned 1.4B model loaded once per warm container
+                               │ commit
+                               ▼
+              artifact Volume: source + events + MIDI + metrics
+                               │
+              job Dict: submitted → preprocessing → transcribing
+                                      → completed / failed
 ```
 
-The local client uploads audio directly to `music-transcription-artifacts` and
-asynchronously invokes the deployed `process_job` function with a small job record.
-The CPU container converts the source to mono, 16 kHz PCM and commits it. An L4
-container reloads that Volume, loads the pinned MuScriptor checkpoint from the
-read-only `music-transcription-models` Volume, and writes the results back.
+The web function is an I/O layer, not an inference server. `@modal.asgi_app`
+adapts FastAPI to Modal, while `@modal.concurrent` lets one CPU container handle
+multiple uploads, polls, and downloads. It uses the Volume client API instead of
+mounting the artifact Volume, avoiding filesystem reload conflicts between
+concurrent requests. The upload is first bounded and streamed through ephemeral
+disk, then committed with immutable request metadata.
 
-| Modal primitive | Concrete role |
-|---|---|
-| Image | Defines the CPU or GPU container filesystem and dependencies |
-| Function | Runs one durable CPU coordinator per song |
-| GPU class | Keeps one model instance in memory while an L4 container is warm |
-| Model Volume | Stores the static checkpoint independently of containers |
-| Artifact Volume | Stores source audio, normalized WAV, MIDI, events, and metrics |
-| Dict | Stores job state, paths, timestamps, errors, and the result summary |
-| `spawn` / `spawn_map` | Submits one job or fans out a batch without waiting locally |
+`process_job.spawn()` makes submission asynchronous: the HTTP request can end
+while a CPU worker normalizes the recording and an L4 worker transcribes it. Those
+workers exchange Volume paths rather than audio bytes. The model checkpoint lives
+on a separate read-only Volume and is loaded by `@modal.enter` once for each warm
+GPU container. GPU inference still has `min_containers=0` and `max_containers=4`,
+so it scales to zero and has a bounded spend rate.
 
-Each job has a stable directory:
+The durable artifacts for each job are:
 
 ```text
 jobs/{job_id}/
@@ -109,6 +107,16 @@ jobs/{job_id}/
 └── metrics.json
 ```
 
-Containers call `commit()` after writes and `reload()` before reading files written
-by another container. The GPU class has `min_containers=0` and `max_containers=4`,
-so it scales to zero when idle and processes up to four songs concurrently.
+| Component | Concrete job |
+|---|---|
+| FastAPI ASGI Function | Accept uploads, return job handles, and serve status/artifacts |
+| CPU `process_job` Function | Normalize one recording and coordinate its GPU call |
+| L4 GPU class | Keep MuScriptor resident while warm and run inference |
+| Model Volume | Persist the static, pinned checkpoint independently of containers |
+| Artifact Volume | Persist source audio and generated files across every stage |
+| Dict | Hold small status records, timestamps, errors, and result summaries |
+| `spawn` / `spawn_map` | Start one durable job or fan out a CLI batch without waiting |
+
+The browser turns paired note-start/note-end events into the piano roll. “Source”
+plays the uploaded recording; “Notes” schedules a lightweight Web Audio preview,
+so M2 does not need another server-side synthesis worker.

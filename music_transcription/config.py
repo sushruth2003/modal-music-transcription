@@ -30,4 +30,18 @@ AUDIO_SAMPLE_RATE = 16_000
 MAX_M1_BATCH_FILES = 4
 SUPPORTED_AUDIO_SUFFIXES = frozenset({".flac", ".m4a", ".mp3", ".ogg", ".wav"})
 
+FASTAPI_PACKAGE = "fastapi==0.141.1"
+MULTIPART_PACKAGE = "python-multipart==0.0.32"
+FRONTEND_MOUNT_PATH = Path("/frontend")
+WEB_MAX_CONTAINERS = 2
+WEB_MAX_CONCURRENT_INPUTS = 25
+WEB_TARGET_CONCURRENT_INPUTS = 10
+WEB_MAX_UPLOAD_BYTES = 100 * 1024 * 1024
+WEB_UPLOAD_CHUNK_BYTES = 1024 * 1024
+MAX_INSTRUMENT_HINTS = 16
+
+# Modal's published L4 rate when this milestone was implemented. This is only
+# used for a clearly labelled inference-time estimate, not as a billing record.
+L4_PRICE_PER_SECOND_USD = 0.000222
+
 MIN_EXPECTED_CHECKPOINT_BYTES = 5_000_000_000

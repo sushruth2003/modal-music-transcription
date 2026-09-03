@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import io
 import json
 import time
 from pathlib import Path
@@ -11,20 +10,16 @@ from pathlib import Path
 import modal
 
 from music_transcription.config import APP_NAME, MAX_M1_BATCH_FILES, SUPPORTED_AUDIO_SUFFIXES
-from music_transcription.resources import artifact_volume, job_states
+from music_transcription.resources import artifact_volume
 from music_transcription.schemas import JobRecord, JobSpec
-from music_transcription.storage import get_job, initial_job_record, job_paths, new_job_spec
+from music_transcription.storage import (
+    get_job,
+    new_job_spec,
+    parse_instruments,
+    stage_job_sources,
+)
 
 TERMINAL_STATES = frozenset({"completed", "failed"})
-
-
-def parse_instruments(value: str | None) -> list[str] | None:
-    """Turn a comma-separated CLI value into MuScriptor instrument names."""
-
-    if value is None:
-        return None
-    instruments = [item.strip() for item in value.split(",") if item.strip()]
-    return instruments or None
 
 
 def validate_source(value: str) -> Path:
@@ -63,15 +58,7 @@ def upload_sources(sources: list[Path], instruments: list[str] | None) -> list[J
     """Upload source audio and immutable request metadata in one Volume commit."""
 
     specs = [new_job_spec(source.name, instruments) for source in sources]
-    with artifact_volume.batch_upload() as batch:
-        for source, spec in zip(sources, specs, strict=True):
-            paths = job_paths(spec["job_id"], spec["source_suffix"])
-            request = json.dumps(spec, indent=2, sort_keys=True).encode() + b"\n"
-            batch.put_file(source, f"/{paths['source']}")
-            batch.put_file(io.BytesIO(request), f"/{paths['request']}")
-
-    for spec in specs:
-        job_states[spec["job_id"]] = initial_job_record(spec)
+    stage_job_sources(sources, specs)
     return specs
 
 

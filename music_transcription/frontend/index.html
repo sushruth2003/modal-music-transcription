@@ -1,0 +1,190 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      name="description"
+      content="Turn a music recording into timestamped notes and MIDI with MuScriptor on Modal."
+    />
+    <title>MuScriptor Studio</title>
+    <link rel="stylesheet" href="/styles.css" />
+    <script src="/app.js" defer></script>
+  </head>
+  <body>
+    <div class="shell">
+      <header class="topbar">
+        <a class="brand" href="/" aria-label="MuScriptor Studio home">
+          <span class="brand-mark" aria-hidden="true">
+            <i></i><i></i><i></i><i></i><i></i>
+          </span>
+          <span>MuScriptor <strong>Studio</strong></span>
+        </a>
+        <span class="runtime"><span></span> Modal · L4</span>
+      </header>
+
+      <main>
+        <section class="intro" aria-labelledby="page-title">
+          <p class="eyebrow">Audio → note events → MIDI</p>
+          <h1 id="page-title">Hear the structure<br />inside the song.</h1>
+          <p class="lede">
+            Upload a recording. MuScriptor separates its musical events into an instrument-aware
+            piano roll you can inspect against the original audio.
+          </p>
+        </section>
+
+        <section class="workspace" aria-label="Transcription workspace">
+          <form id="upload-form" class="upload-card">
+            <div class="step-heading">
+              <span class="step-number">01</span>
+              <div>
+                <p class="section-kicker">Source</p>
+                <h2>Choose a recording</h2>
+              </div>
+            </div>
+
+            <label id="drop-zone" class="drop-zone" for="audio-file">
+              <input
+                id="audio-file"
+                name="audio"
+                type="file"
+                accept="audio/wav,audio/flac,audio/mpeg,audio/mp4,audio/ogg,.wav,.flac,.mp3,.m4a,.ogg"
+                required
+              />
+              <span class="drop-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" role="img">
+                  <path d="M12 16V4m0 0L7.5 8.5M12 4l4.5 4.5M5 14v4a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-4" />
+                </svg>
+              </span>
+              <span class="drop-title" id="file-label">Drop audio here</span>
+              <span class="drop-copy">or browse · WAV, FLAC, MP3, M4A, OGG · 100 MB max</span>
+            </label>
+
+            <label class="field" for="instruments">
+              <span>Instrument hints <small>optional</small></span>
+              <input
+                id="instruments"
+                name="instruments"
+                type="text"
+                placeholder="piano, drums, electric bass"
+                autocomplete="off"
+              />
+            </label>
+
+            <button id="submit-button" class="primary-button" type="submit">
+              <span>Start transcription</span>
+              <svg viewBox="0 0 20 20" aria-hidden="true">
+                <path d="M4 10h12m-5-5 5 5-5 5" />
+              </svg>
+            </button>
+            <p id="form-error" class="form-error" role="alert" hidden></p>
+          </form>
+
+          <section id="job-card" class="job-card" aria-labelledby="job-heading">
+            <div id="empty-state" class="empty-state">
+              <div class="staff" aria-hidden="true">
+                <span></span><span></span><span></span><span></span><span></span>
+                <i class="note one"></i><i class="note two"></i><i class="note three"></i>
+              </div>
+              <p class="section-kicker">Result</p>
+              <h2 id="job-heading">The score will appear here</h2>
+              <p>Your job keeps running even if you close this page. Save the result URL to return.</p>
+            </div>
+
+            <div id="processing-state" class="processing-state" hidden>
+              <div class="job-topline">
+                <div>
+                  <p class="section-kicker">Processing</p>
+                  <h2 id="processing-name">Preparing audio</h2>
+                </div>
+                <span id="progress-value" class="progress-value">10%</span>
+              </div>
+              <div class="progress-track" aria-hidden="true">
+                <span id="progress-fill"></span>
+              </div>
+              <ol class="stage-list" aria-label="Transcription stages">
+                <li data-stage="submitted"><span></span>Uploaded</li>
+                <li data-stage="preprocessing"><span></span>Audio normalized</li>
+                <li data-stage="transcribing"><span></span>GPU transcription</li>
+                <li data-stage="completed"><span></span>Artifacts ready</li>
+              </ol>
+              <p id="job-id-line" class="job-id-line"></p>
+            </div>
+
+            <div id="error-state" class="error-state" hidden>
+              <p class="section-kicker">Could not transcribe</p>
+              <h2>Something interrupted the job.</h2>
+              <p id="job-error"></p>
+              <a href="/" class="secondary-button">Try another file</a>
+            </div>
+
+            <div id="result-state" class="result-state" hidden>
+              <div class="result-header">
+                <div>
+                  <p class="section-kicker">Transcription complete</p>
+                  <h2 id="result-name">Untitled recording</h2>
+                </div>
+                <a id="midi-download" class="download-button" href="#" download>
+                  <svg viewBox="0 0 20 20" aria-hidden="true">
+                    <path d="M10 3v10m0 0 4-4m-4 4L6 9M4 16h12" />
+                  </svg>
+                  Download MIDI
+                </a>
+              </div>
+
+              <div class="transport">
+                <button id="play-button" class="play-button" type="button" aria-label="Play audio">
+                  <svg class="play-icon" viewBox="0 0 20 20" aria-hidden="true">
+                    <path d="m7 5 8 5-8 5V5Z" />
+                  </svg>
+                  <svg class="pause-icon" viewBox="0 0 20 20" aria-hidden="true">
+                    <path d="M6.5 5v10M13.5 5v10" />
+                  </svg>
+                </button>
+                <div class="transport-main">
+                  <div class="transport-row">
+                    <span id="current-time">0:00</span>
+                    <span id="total-time">0:00</span>
+                  </div>
+                  <input id="timeline" type="range" min="0" max="1000" value="0" aria-label="Playback position" />
+                </div>
+                <div class="source-switch" role="group" aria-label="Playback source">
+                  <button type="button" class="active" data-mode="source">Source</button>
+                  <button type="button" data-mode="synth">Notes</button>
+                </div>
+                <audio id="source-audio" preload="metadata"></audio>
+              </div>
+
+              <div class="roll-toolbar">
+                <div id="instrument-filters" class="instrument-filters" aria-label="Instrument filters"></div>
+                <div class="roll-legend">
+                  <span><i></i> pitch</span>
+                  <span><i></i> time</span>
+                </div>
+              </div>
+              <div class="piano-roll" id="piano-roll">
+                <canvas id="roll-canvas" aria-label="Time-aligned piano roll"></canvas>
+                <p id="roll-empty" hidden>No complete notes were returned for this recording.</p>
+              </div>
+
+              <dl class="metrics">
+                <div><dt>Notes</dt><dd id="metric-notes">—</dd></div>
+                <div><dt>Audio</dt><dd id="metric-duration">—</dd></div>
+                <div><dt>GPU inference</dt><dd id="metric-inference">—</dd></div>
+                <div>
+                  <dt>Est. inference GPU</dt><dd id="metric-cost">—</dd>
+                  <span class="metric-help">excludes startup + CPU</span>
+                </div>
+              </dl>
+            </div>
+          </section>
+        </section>
+      </main>
+
+      <footer>
+        <span>MuScriptor Large · 1.4B parameters</span>
+        <a href="/docs">API docs</a>
+      </footer>
+    </div>
+  </body>
+</html>
