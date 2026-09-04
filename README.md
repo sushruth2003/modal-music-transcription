@@ -2,6 +2,11 @@
 
 Transcribe uploaded audio or video into timestamped notes, MIDI, and optional sheet music with MuScriptor Large on Modal.
 
+**[Try Auto Transcribe live →](https://sushruthb03--transcribe.modal.run/)**
+
+The hosted version is a small public beta with shared usage limits. No setup is
+required—upload a recording and keep the result URL while the durable job runs.
+
 ## Quickstart
 
 You need Python 3.12, [`uv`](https://docs.astral.sh/uv/), a
@@ -68,39 +73,98 @@ uv run python -m music_transcription.client download --job-id <job_id>
 
 ## Architecture
 
-```text
-browser / CLI
-     │
-     │ POST media upload                  GET status / audio / MIDI / score
-     ▼                                                   ▲
-┌────────────────────────────────────────────────────────────────────────┐
-│ CPU-only FastAPI ASGI Function                                         │
-│ validate upload → reserve quota → stage request → process_job.spawn()  │
-│ returns 202 + job_id immediately                                       │
-└──────────────────────────────┬─────────────────────────────────────────┘
-                               │ small JobSpec
-                               ▼
-                    CPU process_job Function
-                    ffmpeg extracts audio → mono 16 kHz WAV
-                               │ commit + path reference
-                               ▼
-                    CPU Beat This! class
-                    constant tempo + meter + downbeat grid
-                               │ small JSON grid
-                               ▼
-                    L4 MuScriptor GPU class
-                    pinned 1.4B model loaded once per warm container
-                    grid corrects MIDI tempo, bars, and onset timing
-                               │ commit
-                               ▼
-              Score only: CPU MuseScore Function
-              MIDI → printable PDF
-                               │
-                               ▼
-     artifact Volume: source + events + MIDI + optional score + metrics
-                               │
-     job Dict: submitted → preprocessing → transcribing
-                                    → [rendering] → completed / failed
+```mermaid
+flowchart LR
+    user["Browser or CLI"]
+
+    subgraph web["Modal web tier · CPU"]
+        api["FastAPI ASGI<br/>validate · reserve quota · stage upload"]
+    end
+
+    subgraph workers["Durable processing workers"]
+        job["process_job · CPU<br/>FFmpeg → mono 16 kHz WAV"]
+        beat["Beat This · CPU<br/>tempo · meter · downbeats"]
+        gpu["MuScriptor Large · L4<br/>pitch · onset · offset · instrument"]
+        timing["Beat-grid correction<br/>tempo · bars · note timing"]
+        score["MuseScore · CPU · optional<br/>MIDI → PDF draft"]
+    end
+
+    jobs[("Job state Dict")]
+    artifacts[("Artifact Volume")]
+    models[("Pinned model Volume")]
+
+    user -->|"POST media"| api
+    api -->|"202 + job and result URLs"| user
+    api -->|"spawn small JobSpec"| job
+    job --> beat --> gpu --> timing
+    timing -->|"score requested"| score
+    timing --> artifacts
+    score --> artifacts
+    models -.-> beat
+    models -.-> gpu
+    job --> jobs
+    beat --> jobs
+    gpu --> jobs
+    score --> jobs
+    api <-->|"poll status"| jobs
+    api <-->|"stream audio · MIDI · PDF"| artifacts
+
+    classDef edge fill:#17200e,stroke:#c8f560,color:#f2f0e8;
+    classDef compute fill:#1e211d,stroke:#59d4d8,color:#f2f0e8;
+    classDef durable fill:#211d2b,stroke:#a892ff,color:#f2f0e8;
+    class user,api edge;
+    class job,beat,gpu,timing,score compute;
+    class jobs,artifacts,models durable;
+```
+
+### Job lifecycle
+
+```mermaid
+sequenceDiagram
+    actor User
+    participant Web as FastAPI web function
+    participant Jobs as Job Dict
+    participant Flow as process_job CPU worker
+    participant Beat as Beat This CPU worker
+    participant GPU as MuScriptor L4 worker
+    participant Score as MuseScore CPU worker
+    participant Files as Artifact Volume
+
+    User->>Web: Upload audio or video
+    Web->>Web: Validate file and reserve quota
+    Web->>Files: Commit source and request metadata
+    Web->>Jobs: submitted
+    Web->>Flow: Spawn durable job
+    Web-->>User: 202 Accepted + result URL
+    Note over Web,Flow: Processing continues after the upload request ends
+
+    par Durable background processing
+        Flow->>Jobs: preprocessing
+        Flow->>Files: Write normalized 16 kHz audio
+        Flow->>Beat: Detect tempo, meter, beats, and downbeats
+        Beat-->>Flow: Validated beat grid or safe fallback
+        Flow->>Jobs: transcribing
+        Flow->>GPU: Transcribe audio with optional instrument hints
+        GPU->>GPU: Correct timing against the beat grid
+        GPU->>Files: Commit events, MIDI, and metrics
+
+        opt PDF score requested
+            Flow->>Jobs: rendering
+            Flow->>Score: Render MIDI
+            Score->>Files: Commit PDF draft
+        end
+
+        Flow->>Jobs: completed
+    and Browser status polling
+        loop Until terminal state
+            User->>Web: Poll result URL
+            Web->>Jobs: Read status
+            Web-->>User: Progress or artifact links
+        end
+    end
+    User->>Web: Seek source audio with byte range
+    Web->>Files: Read stored recording
+    Web-->>User: 206 Partial Content
 ```
 
 The web function is an I/O layer, not an inference server. `@modal.asgi_app`
@@ -131,8 +195,8 @@ tempo. When a grid is usable, the exported MIDI receives its measured tempo and
 time signature, bar lines are aligned to the first downbeat, and MuScriptor's
 small global onset lag is corrected in both MIDI and browser events. Source audio
 is served with HTTP byte ranges, so the browser can seek without downloading the
-recording again. The timing
-summary and any fallback reason are recorded in `metrics.json`.
+recording again. The timing summary and any fallback reason are recorded in
+`metrics.json`.
 
 See [Beat-grid correction](BEAT_GRID.md) for the validation thresholds,
 onset and bar-offset semantics, checkpoint lifecycle, fallback policy, and
@@ -173,8 +237,8 @@ the underlying transcription model, not the name of the application.
 
 ## Public hobby deployment
 
-The URL printed by `modal deploy` is already a public HTTPS endpoint and is the
-simplest way to share this small beta. The app uses one GPU worker at a time,
+The **[live public app](https://sushruthb03--transcribe.modal.run/)** is the
+simplest way to try or share this small beta. The app uses one GPU worker at a time,
 scales GPU and beat workers to zero after 30 idle seconds, and uses the quota
 rules above to limit accidental use. Its explicit `transcribe` endpoint label
 keeps the generated URL short and stable across deployments.
@@ -198,5 +262,5 @@ timeline seeking without submitting a paid transcription job.
 ```bash
 uv run playwright install chromium
 uv run python scripts/probe_web.py \
-  --base-url https://your-deployment.modal.run
+  --base-url https://sushruthb03--transcribe.modal.run
 ```
