@@ -18,6 +18,7 @@ MODEL_READY_PATH = MODEL_SNAPSHOT_PATH / "READY.json"
 ARTIFACT_VOLUME_NAME = "music-transcription-artifacts"
 ARTIFACT_MOUNT_PATH = Path("/artifacts")
 JOB_DICT_NAME = "music-transcription-jobs"
+RATE_LIMIT_DICT_NAME = "music-transcription-rate-limits"
 
 HUGGINGFACE_SECRET_NAME = "huggingface-secret"
 HUGGINGFACE_HUB_PACKAGE = "huggingface-hub==1.29.0"
@@ -27,22 +28,22 @@ GPU_MAX_CONTAINERS = 4
 GPU_SCALEDOWN_WINDOW_SECONDS = 120
 
 AUDIO_SAMPLE_RATE = 16_000
+MAX_AUDIO_SECONDS = 10 * 60
 MAX_M1_BATCH_FILES = 4
 SUPPORTED_AUDIO_SUFFIXES = frozenset({".flac", ".m4a", ".mp3", ".ogg", ".wav"})
 
 FASTAPI_PACKAGE = "fastapi==0.141.1"
 MULTIPART_PACKAGE = "python-multipart==0.0.32"
 FRONTEND_MOUNT_PATH = Path("/frontend")
-WEB_MAX_CONTAINERS = 2
+WEB_MAX_CONTAINERS = 1
 WEB_MAX_CONCURRENT_INPUTS = 25
 WEB_TARGET_CONCURRENT_INPUTS = 10
 WEB_MAX_UPLOAD_BYTES = 100 * 1024 * 1024
 WEB_UPLOAD_CHUNK_BYTES = 1024 * 1024
 MAX_INSTRUMENT_HINTS = 16
-WEB_SECRET_NAME = "music-transcription-web-secret"
-WEB_ACCESS_TOKEN_ENV = "WEB_ACCESS_TOKEN"
-WEB_SESSION_COOKIE = "music_transcription_session"
-WEB_SESSION_SECONDS = 12 * 60 * 60
+WEB_SUBMISSIONS_PER_IP_HOUR = 3
+WEB_SUBMISSIONS_GLOBAL_DAY = 10
+WEB_RATE_LIMIT_WINDOW_SECONDS = 60 * 60
 
 # Modal's published L4 rate when this milestone was implemented. This is only
 # used for a clearly labelled inference-time estimate, not as a billing record.

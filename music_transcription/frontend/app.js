@@ -1,11 +1,5 @@
 const els = {
-  authCard: document.querySelector("#auth-card"),
-  authForm: document.querySelector("#auth-form"),
-  accessToken: document.querySelector("#access-token"),
-  authError: document.querySelector("#auth-error"),
-  logout: document.querySelector("#logout-button"),
   form: document.querySelector("#upload-form"),
-  jobCard: document.querySelector("#job-card"),
   file: document.querySelector("#audio-file"),
   fileLabel: document.querySelector("#file-label"),
   instruments: document.querySelector("#instruments"),
@@ -56,26 +50,6 @@ const state = {
 const palette = ["#c8f560", "#59d4d8", "#a892ff", "#ff7968", "#efb94f", "#5ea0ff"];
 const stageOrder = ["submitted", "preprocessing", "transcribing", "completed"];
 
-class AuthenticationRequired extends Error {}
-
-function showAuth(message = "") {
-  els.authCard.hidden = false;
-  els.form.hidden = true;
-  els.jobCard.hidden = true;
-  els.logout.hidden = true;
-  els.authError.textContent = message;
-  els.authError.hidden = !message;
-  window.setTimeout(() => els.accessToken.focus(), 0);
-}
-
-function showWorkspace() {
-  els.authCard.hidden = true;
-  els.form.hidden = false;
-  els.jobCard.hidden = false;
-  els.logout.hidden = false;
-  els.authError.hidden = true;
-}
-
 function showView(name) {
   for (const [key, element] of Object.entries({
     empty: els.empty,
@@ -95,7 +69,13 @@ function formatTime(seconds) {
 }
 
 function readableError(payload, fallback) {
-  if (payload && typeof payload.detail === "string") return payload.detail;
+  if (payload && typeof payload.detail === "string") {
+    if (Number.isFinite(payload.retry_after_seconds)) {
+      const minutes = Math.max(1, Math.ceil(payload.retry_after_seconds / 60));
+      return `${payload.detail}. Try again in about ${minutes} minute${minutes === 1 ? "" : "s"}.`;
+    }
+    return payload.detail;
+  }
   return fallback;
 }
 
@@ -119,10 +99,7 @@ function submitUpload(formData) {
     });
     request.addEventListener("load", () => {
       if (request.status >= 200 && request.status < 300) resolve(request.response);
-      else if (request.status === 401) {
-        showAuth("Your session expired. Enter the access code again.");
-        reject(new AuthenticationRequired());
-      } else reject(new Error(readableError(request.response, "Upload failed")));
+      else reject(new Error(readableError(request.response, "Upload failed")));
     });
     request.addEventListener("error", () => reject(new Error("Could not reach the service")));
     request.send(formData);
@@ -150,7 +127,6 @@ async function handleSubmit(event) {
     els.jobIdLine.textContent = `JOB ${state.jobId}`;
     await pollJob();
   } catch (error) {
-    if (error instanceof AuthenticationRequired) return;
     showView("empty");
     els.formError.textContent = error.message;
     els.formError.hidden = false;
@@ -181,10 +157,6 @@ function updateProcessing(jobState, progress, label) {
 async function getJson(url) {
   const response = await fetch(url, { headers: { Accept: "application/json" } });
   const payload = await response.json().catch(() => null);
-  if (response.status === 401) {
-    showAuth("Your session expired. Enter the access code again.");
-    throw new AuthenticationRequired();
-  }
   if (!response.ok) throw new Error(readableError(payload, `Request failed (${response.status})`));
   return payload;
 }
@@ -208,7 +180,6 @@ async function pollJob() {
       updateProcessing(job.state, job.progress);
       await new Promise((resolve) => setTimeout(resolve, (job.retry_after_seconds || 2) * 1000));
     } catch (error) {
-      if (error instanceof AuthenticationRequired) return;
       els.jobError.textContent = error.message;
       showView("error");
       return;
@@ -419,65 +390,16 @@ function setPlaybackMode(mode) {
   updateTransport(time);
 }
 
-async function handleLogin(event) {
-  event.preventDefault();
-  const button = els.authForm.querySelector("button");
-  els.authError.hidden = true;
-  button.disabled = true;
-  button.textContent = "Checking…";
-  try {
-    const response = await fetch("/auth/session", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ access_token: els.accessToken.value }),
-    });
-    const payload = await response.json().catch(() => null);
-    if (!response.ok) throw new Error(readableError(payload, "Could not unlock this workspace"));
-    els.accessToken.value = "";
-    showWorkspace();
-    if (state.jobId) {
-      updateProcessing("submitted", 10, "Loading durable job");
-      await pollJob();
-    } else showView("empty");
-  } catch (error) {
-    els.authError.textContent = error.message;
-    els.authError.hidden = false;
-  } finally {
-    button.disabled = false;
-    button.textContent = "Unlock";
-  }
-}
-
-async function handleLogout() {
-  els.audio.pause();
-  stopSynth(false);
-  await fetch("/auth/session", { method: "DELETE" }).catch(() => null);
-  showAuth("Signed out.");
-}
-
-async function initialize() {
+function initialize() {
   const jobMatch = window.location.pathname.match(/^\/jobs\/([0-9a-f]{32})$/);
   if (jobMatch) state.jobId = jobMatch[1];
-  try {
-    const response = await fetch("/auth/session", { headers: { Accept: "application/json" } });
-    const session = await response.json();
-    if (!session.authenticated) {
-      showAuth();
-      return;
-    }
-    showWorkspace();
-    if (state.jobId) {
-      els.jobIdLine.textContent = `JOB ${state.jobId}`;
-      updateProcessing("submitted", 10, "Loading durable job");
-      await pollJob();
-    } else showView("empty");
-  } catch (_) {
-    showAuth("Could not verify the session. Try again.");
-  }
+  if (state.jobId) {
+    els.jobIdLine.textContent = `JOB ${state.jobId}`;
+    updateProcessing("submitted", 10, "Loading durable job");
+    pollJob();
+  } else showView("empty");
 }
 
-els.authForm.addEventListener("submit", handleLogin);
-els.logout.addEventListener("click", handleLogout);
 els.form.addEventListener("submit", handleSubmit);
 els.file.addEventListener("change", () => setSelectedFile(els.file.files[0]));
 for (const eventName of ["dragenter", "dragover"]) {

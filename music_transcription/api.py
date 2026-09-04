@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
-import hmac
 import json
 import mimetypes
-import os
 import tempfile
 from collections.abc import Iterable
+from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Annotated, Any, BinaryIO
 from urllib.parse import quote
@@ -23,17 +23,17 @@ from music_transcription.config import (
     FRONTEND_MOUNT_PATH,
     L4_PRICE_PER_SECOND_USD,
     MAX_INSTRUMENT_HINTS,
-    WEB_ACCESS_TOKEN_ENV,
     WEB_MAX_CONCURRENT_INPUTS,
     WEB_MAX_CONTAINERS,
     WEB_MAX_UPLOAD_BYTES,
-    WEB_SESSION_COOKIE,
-    WEB_SESSION_SECONDS,
+    WEB_RATE_LIMIT_WINDOW_SECONDS,
+    WEB_SUBMISSIONS_GLOBAL_DAY,
+    WEB_SUBMISSIONS_PER_IP_HOUR,
     WEB_TARGET_CONCURRENT_INPUTS,
     WEB_UPLOAD_CHUNK_BYTES,
 )
 from music_transcription.preprocess import process_job
-from music_transcription.resources import app, artifact_volume, web_image, web_secret
+from music_transcription.resources import app, artifact_volume, rate_limit_states, web_image
 from music_transcription.schemas import JobRecord, JobSpec, SerializedEvent
 from music_transcription.storage import (
     get_job,
@@ -52,46 +52,83 @@ STATE_PROGRESS = {
     "completed": 100,
     "failed": 100,
 }
-SESSION_PURPOSE = b"music-transcription-browser-session-v1"
+RATE_LIMIT_STATE_KEY = "submission-limits-v1"
 
 
 class UploadTooLargeError(ValueError):
     """Raised after a streamed upload crosses the configured byte limit."""
 
 
-def configured_access_token() -> str:
-    """Return the server-side access token injected by a Modal Secret."""
-
-    token = os.environ.get(WEB_ACCESS_TOKEN_ENV, "")
-    if len(token) < 24:
-        raise RuntimeError(f"{WEB_ACCESS_TOKEN_ENV} must contain at least 24 characters")
-    return token
-
-
-def browser_session_token(access_token: str) -> str:
-    """Derive a cookie value without putting the access token itself in the cookie."""
-
-    return hmac.new(access_token.encode(), SESSION_PURPOSE, hashlib.sha256).hexdigest()
+@dataclass(frozen=True)
+class RateLimitDecision:
+    allowed: bool
+    retry_after_seconds: int
+    ip_remaining: int
+    global_remaining: int
 
 
-def request_is_authenticated(request: Request) -> bool:
-    """Accept either the HttpOnly browser session or an API bearer token."""
+def evaluate_submission_limit(
+    stored: dict[str, object] | None,
+    client_key: str,
+    now: float,
+) -> tuple[dict[str, object], RateLimitDecision]:
+    """Apply rolling per-client and UTC-day global limits to a persisted record."""
 
-    access_token = configured_access_token()
-    authorization = request.headers.get("authorization", "")
-    if authorization.startswith("Bearer "):
-        return hmac.compare_digest(authorization[7:], access_token)
-    session = request.cookies.get(WEB_SESSION_COOKIE, "")
-    return hmac.compare_digest(session, browser_session_token(access_token))
+    current = datetime.fromtimestamp(now, UTC)
+    day = current.date().isoformat()
+    if stored is None or stored.get("day") != day:
+        state: dict[str, object] = {"day": day, "global_count": 0, "clients": {}}
+    else:
+        state = {
+            "day": day,
+            "global_count": int(stored.get("global_count", 0)),
+            "clients": dict(stored.get("clients", {})),
+        }
 
+    clients = state["clients"]
+    assert isinstance(clients, dict)
+    cutoff = now - WEB_RATE_LIMIT_WINDOW_SECONDS
+    events = [
+        float(timestamp) for timestamp in clients.get(client_key, []) if float(timestamp) > cutoff
+    ]
+    clients[client_key] = events
+    global_count = int(state["global_count"])
 
-def require_authentication(request: Request) -> None:
-    if not request_is_authenticated(request):
-        raise HTTPException(
-            status_code=401,
-            detail="Sign in to use this transcription workspace",
-            headers={"WWW-Authenticate": "Bearer"},
+    if global_count >= WEB_SUBMISSIONS_GLOBAL_DAY:
+        next_day = datetime.combine(current.date() + timedelta(days=1), datetime.min.time(), UTC)
+        retry_after = max(1, int((next_day - current).total_seconds()))
+        return state, RateLimitDecision(False, retry_after, 0, 0)
+    if len(events) >= WEB_SUBMISSIONS_PER_IP_HOUR:
+        retry_after = max(1, int(events[0] + WEB_RATE_LIMIT_WINDOW_SECONDS - now) + 1)
+        return state, RateLimitDecision(
+            False,
+            retry_after,
+            0,
+            WEB_SUBMISSIONS_GLOBAL_DAY - global_count,
         )
+
+    events.append(now)
+    state["global_count"] = global_count + 1
+    return state, RateLimitDecision(
+        True,
+        0,
+        WEB_SUBMISSIONS_PER_IP_HOUR - len(events),
+        WEB_SUBMISSIONS_GLOBAL_DAY - global_count - 1,
+    )
+
+
+def reserve_submission(client_ip: str, now: float | None = None) -> RateLimitDecision:
+    """Atomically reserve one quota slot inside the single web container."""
+
+    client_key = hashlib.sha256(client_ip.encode()).hexdigest()[:24]
+    stored = rate_limit_states.get(RATE_LIMIT_STATE_KEY)
+    state, decision = evaluate_submission_limit(
+        stored,
+        client_key,
+        datetime.now(UTC).timestamp() if now is None else now,
+    )
+    rate_limit_states[RATE_LIMIT_STATE_KEY] = state
+    return decision
 
 
 def copy_limited(source: BinaryIO, destination: Path, max_bytes: int) -> int:
@@ -263,12 +300,48 @@ def create_web_app() -> FastAPI:
         description="Asynchronous audio-to-MIDI transcription",
         version="0.2.0",
     )
+    submission_lock = asyncio.Lock()
 
     @web_app.middleware("http")
-    async def prevent_private_response_caching(request: Request, call_next: Any) -> Response:
+    async def limit_submissions(request: Request, call_next: Any) -> Response:
+        decision: RateLimitDecision | None = None
+        if request.method == "POST" and request.url.path == "/transcriptions":
+            client_ip = request.client.host if request.client is not None else "unknown"
+            try:
+                async with submission_lock:
+                    decision = await asyncio.to_thread(reserve_submission, client_ip)
+            except Exception:  # noqa: BLE001 - fail closed if quota storage is unavailable
+                return JSONResponse(
+                    status_code=503,
+                    content={"detail": "Submission quota is temporarily unavailable"},
+                    headers={"Retry-After": "30", "Cache-Control": "no-store"},
+                )
+            if not decision.allowed:
+                detail = (
+                    "Today's public demo quota is full"
+                    if decision.global_remaining == 0
+                    else "This network has reached its hourly submission limit"
+                )
+                return JSONResponse(
+                    status_code=429,
+                    content={
+                        "detail": detail,
+                        "retry_after_seconds": decision.retry_after_seconds,
+                    },
+                    headers={
+                        "Retry-After": str(decision.retry_after_seconds),
+                        "X-RateLimit-IP-Remaining": str(decision.ip_remaining),
+                        "X-RateLimit-Global-Remaining": str(decision.global_remaining),
+                        "Cache-Control": "no-store",
+                    },
+                )
+
         response = await call_next(request)
-        if request.url.path.startswith(("/auth/", "/transcriptions")):
+        if request.url.path.startswith("/transcriptions"):
             response.headers["Cache-Control"] = "no-store"
+        if decision is not None:
+            response.headers["X-RateLimit-IP-Remaining"] = str(decision.ip_remaining)
+            response.headers["X-RateLimit-Global-Remaining"] = str(decision.global_remaining)
         return response
 
     async def lookup_job(job_id: str) -> JobRecord:
@@ -298,54 +371,12 @@ def create_web_app() -> FastAPI:
     async def health() -> dict[str, str]:
         return {"status": "ok"}
 
-    @web_app.get("/auth/session")
-    async def auth_session(request: Request) -> dict[str, bool]:
-        return {"authenticated": request_is_authenticated(request)}
-
-    @web_app.post("/auth/session")
-    async def create_auth_session(request: Request) -> JSONResponse:
-        try:
-            payload = await request.json()
-        except json.JSONDecodeError as error:
-            raise HTTPException(status_code=400, detail="Expected a JSON request") from error
-        supplied = payload.get("access_token") if isinstance(payload, dict) else None
-        access_token = configured_access_token()
-        if not isinstance(supplied, str) or not hmac.compare_digest(supplied, access_token):
-            raise HTTPException(status_code=401, detail="Incorrect access code")
-
-        response = JSONResponse({"authenticated": True})
-        response.set_cookie(
-            key=WEB_SESSION_COOKIE,
-            value=browser_session_token(access_token),
-            max_age=WEB_SESSION_SECONDS,
-            httponly=True,
-            secure=True,
-            samesite="strict",
-            path="/",
-        )
-        response.headers["Cache-Control"] = "no-store"
-        return response
-
-    @web_app.delete("/auth/session")
-    async def delete_auth_session() -> JSONResponse:
-        response = JSONResponse({"authenticated": False})
-        response.delete_cookie(
-            key=WEB_SESSION_COOKIE,
-            httponly=True,
-            secure=True,
-            samesite="strict",
-            path="/",
-        )
-        response.headers["Cache-Control"] = "no-store"
-        return response
-
     @web_app.post("/transcriptions", status_code=status.HTTP_202_ACCEPTED)
     async def submit_transcription(
         request: Request,
         audio: Annotated[UploadFile, File()],
         instruments: Annotated[str | None, Form()] = None,
     ) -> JSONResponse:
-        require_authentication(request)
         content_length = request.headers.get("content-length")
         if (
             content_length
@@ -400,13 +431,11 @@ def create_web_app() -> FastAPI:
         )
 
     @web_app.get("/transcriptions/{job_id}")
-    async def transcription_status(job_id: str, request: Request) -> dict[str, object]:
-        require_authentication(request)
+    async def transcription_status(job_id: str) -> dict[str, object]:
         return public_job_record(await lookup_job(job_id))
 
     @web_app.get("/transcriptions/{job_id}/events")
-    async def transcription_events(job_id: str, request: Request) -> Response:
-        require_authentication(request)
+    async def transcription_events(job_id: str) -> Response:
         record = await completed_job(job_id)
         payload = await artifact(record, "events")
         return Response(
@@ -420,8 +449,7 @@ def create_web_app() -> FastAPI:
         )
 
     @web_app.get("/transcriptions/{job_id}/piano-roll")
-    async def transcription_piano_roll(job_id: str, request: Request) -> dict[str, object]:
-        require_authentication(request)
+    async def transcription_piano_roll(job_id: str) -> dict[str, object]:
         record = await completed_job(job_id)
         payload = await artifact(record, "events")
         try:
@@ -442,8 +470,7 @@ def create_web_app() -> FastAPI:
         }
 
     @web_app.get("/transcriptions/{job_id}/midi")
-    async def transcription_midi(job_id: str, request: Request) -> Response:
-        require_authentication(request)
+    async def transcription_midi(job_id: str) -> Response:
         record = await completed_job(job_id)
         payload = await artifact(record, "midi")
         return Response(
@@ -457,8 +484,7 @@ def create_web_app() -> FastAPI:
         )
 
     @web_app.get("/transcriptions/{job_id}/audio")
-    async def transcription_audio(job_id: str, request: Request) -> Response:
-        require_authentication(request)
+    async def transcription_audio(job_id: str) -> Response:
         record = await lookup_job(job_id)
         payload = await artifact(record, "source")
         media_type = mimetypes.guess_type(record["source_name"])[0] or "application/octet-stream"
@@ -484,7 +510,6 @@ def create_web_app() -> FastAPI:
 
 @app.function(
     image=web_image,
-    secrets=[web_secret],
     cpu=1.0,
     memory=1024,
     timeout=15 * 60,

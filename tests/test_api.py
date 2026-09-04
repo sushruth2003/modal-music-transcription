@@ -9,11 +9,12 @@ from music_transcription import api
 from music_transcription.storage import initial_job_record
 
 JOB_ID = "a" * 32
-ACCESS_TOKEN = "test-access-token-with-32-characters"
-
-
-def auth_headers() -> dict[str, str]:
-    return {"Authorization": f"Bearer {ACCESS_TOKEN}"}
+ALLOW_SUBMISSION = api.RateLimitDecision(
+    allowed=True,
+    retry_after_seconds=0,
+    ip_remaining=2,
+    global_remaining=9,
+)
 
 
 def completed_record():
@@ -74,18 +75,19 @@ def test_submit_returns_accepted_job_handle(monkeypatch) -> None:
     }
     monkeypatch.setattr(api, "stage_uploaded_file", lambda *_args: (spec, 5))
     monkeypatch.setattr(api, "spawn_process_job", lambda _spec: "fc-123")
-    monkeypatch.setenv(api.WEB_ACCESS_TOKEN_ENV, ACCESS_TOKEN)
+    monkeypatch.setattr(api, "reserve_submission", lambda _client_ip: ALLOW_SUBMISSION)
     client = TestClient(api.create_web_app())
 
     response = client.post(
         "/transcriptions",
         files={"audio": ("demo.wav", b"audio", "audio/wav")},
         data={"instruments": "piano"},
-        headers=auth_headers(),
     )
 
     assert response.status_code == 202
     assert response.headers["location"] == f"/transcriptions/{JOB_ID}"
+    assert response.headers["x-ratelimit-ip-remaining"] == "2"
+    assert response.headers["x-ratelimit-global-remaining"] == "9"
     assert response.json() == {
         "job_id": JOB_ID,
         "state": "submitted",
@@ -104,11 +106,10 @@ def test_status_and_piano_roll_endpoints(monkeypatch) -> None:
     )
     monkeypatch.setattr(api, "get_job", lambda _job_id: record)
     monkeypatch.setattr(api, "read_artifact_bytes", lambda _path: event_bytes)
-    monkeypatch.setenv(api.WEB_ACCESS_TOKEN_ENV, ACCESS_TOKEN)
     client = TestClient(api.create_web_app())
 
-    status = client.get(f"/transcriptions/{JOB_ID}", headers=auth_headers())
-    roll = client.get(f"/transcriptions/{JOB_ID}/piano-roll", headers=auth_headers())
+    status = client.get(f"/transcriptions/{JOB_ID}")
+    roll = client.get(f"/transcriptions/{JOB_ID}/piano-roll")
 
     assert status.status_code == 200
     assert status.json()["state"] == "completed"
@@ -138,39 +139,47 @@ def test_job_page_and_health_are_served() -> None:
     assert "MuScriptor Studio" in page.text
 
 
-def test_transcription_routes_require_authentication(monkeypatch) -> None:
-    monkeypatch.setenv(api.WEB_ACCESS_TOKEN_ENV, ACCESS_TOKEN)
+def test_rate_limit_allows_three_hourly_submissions_then_rejects() -> None:
+    now = 1_800_000_000.0
+    state = None
+    decisions = []
+    for _ in range(4):
+        state, decision = api.evaluate_submission_limit(state, "client-a", now)
+        decisions.append(decision)
+        now += 1
+
+    assert [decision.allowed for decision in decisions] == [True, True, True, False]
+    assert decisions[2].ip_remaining == 0
+    assert decisions[3].retry_after_seconds > 3_500
+
+
+def test_rate_limit_enforces_global_day_and_resets_next_day() -> None:
+    now = 1_800_000_000.0
+    state = None
+    for index in range(api.WEB_SUBMISSIONS_GLOBAL_DAY):
+        state, decision = api.evaluate_submission_limit(state, f"client-{index}", now)
+        assert decision.allowed
+
+    state, denied = api.evaluate_submission_limit(state, "one-more", now)
+    state, next_day = api.evaluate_submission_limit(state, "one-more", now + 24 * 60 * 60)
+
+    assert not denied.allowed
+    assert denied.global_remaining == 0
+    assert next_day.allowed
+
+
+def test_rate_limit_rejects_before_parsing_upload(monkeypatch) -> None:
+    denied = api.RateLimitDecision(
+        allowed=False,
+        retry_after_seconds=60,
+        ip_remaining=0,
+        global_remaining=7,
+    )
+    monkeypatch.setattr(api, "reserve_submission", lambda _client_ip: denied)
     client = TestClient(api.create_web_app())
 
-    status = client.get(f"/transcriptions/{JOB_ID}")
-    submit = client.post(
-        "/transcriptions",
-        files={"audio": ("demo.wav", b"audio", "audio/wav")},
-    )
+    response = client.post("/transcriptions")
 
-    assert status.status_code == 401
-    assert status.headers["www-authenticate"] == "Bearer"
-    assert submit.status_code == 401
-
-
-def test_browser_login_sets_secure_session_and_logout_clears_it(monkeypatch) -> None:
-    monkeypatch.setenv(api.WEB_ACCESS_TOKEN_ENV, ACCESS_TOKEN)
-    monkeypatch.setattr(api, "get_job", lambda _job_id: completed_record())
-    client = TestClient(api.create_web_app(), base_url="https://testserver")
-
-    rejected = client.post("/auth/session", json={"access_token": "wrong"})
-    login = client.post("/auth/session", json={"access_token": ACCESS_TOKEN})
-    authenticated = client.get("/auth/session")
-    status = client.get(f"/transcriptions/{JOB_ID}")
-    logout = client.delete("/auth/session")
-    signed_out = client.get(f"/transcriptions/{JOB_ID}")
-
-    assert rejected.status_code == 401
-    assert login.status_code == 200
-    assert "HttpOnly" in login.headers["set-cookie"]
-    assert "Secure" in login.headers["set-cookie"]
-    assert "SameSite=strict" in login.headers["set-cookie"]
-    assert authenticated.json() == {"authenticated": True}
-    assert status.status_code == 200
-    assert logout.status_code == 200
-    assert signed_out.status_code == 401
+    assert response.status_code == 429
+    assert response.headers["retry-after"] == "60"
+    assert response.json()["retry_after_seconds"] == 60

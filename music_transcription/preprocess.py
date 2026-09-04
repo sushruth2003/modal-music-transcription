@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import subprocess
 import time
 import wave
@@ -11,6 +12,7 @@ from pathlib import Path
 from music_transcription.config import (
     ARTIFACT_MOUNT_PATH,
     AUDIO_SAMPLE_RATE,
+    MAX_AUDIO_SECONDS,
     SUPPORTED_AUDIO_SUFFIXES,
 )
 from music_transcription.resources import app, artifact_volume, audio_image
@@ -30,12 +32,49 @@ def audio_duration_path(wav_path: Path, source_name: str) -> float:
     return frame_count / frame_rate
 
 
+def probe_audio_duration(source_path: Path) -> float:
+    """Read container-level duration without decoding the complete recording."""
+
+    command = [
+        "ffprobe",
+        "-v",
+        "error",
+        "-show_entries",
+        "format=duration",
+        "-of",
+        "default=noprint_wrappers=1:nokey=1",
+        str(source_path),
+    ]
+    completed = subprocess.run(command, capture_output=True, text=True, check=False)
+    if completed.returncode != 0:
+        stderr = completed.stderr.strip()[-4_000:]
+        raise RuntimeError(f"ffprobe could not inspect {source_path.name!r}:\n{stderr}")
+    try:
+        duration = float(completed.stdout.strip())
+    except ValueError as error:
+        raise RuntimeError(f"ffprobe returned no duration for {source_path.name!r}") from error
+    if not math.isfinite(duration) or duration <= 0:
+        raise ValueError(f"Audio duration is invalid for {source_path.name!r}")
+    return duration
+
+
+def enforce_audio_duration_limit(duration: float, source_name: str) -> None:
+    if duration > MAX_AUDIO_SECONDS:
+        maximum_minutes = MAX_AUDIO_SECONDS // 60
+        raise ValueError(
+            f"Audio {source_name!r} is {duration / 60:.1f} minutes; the public demo limit is "
+            f"{maximum_minutes} minutes"
+        )
+
+
 def normalize_audio_file(source_path: Path, wav_path: Path) -> tuple[float, PreprocessingMetrics]:
     """Normalize one filesystem input directly to another without a byte payload."""
 
     suffix = source_path.suffix.lower()
     if suffix not in SUPPORTED_AUDIO_SUFFIXES:
         raise ValueError(f"Unsupported source suffix: {suffix!r}")
+
+    enforce_audio_duration_limit(probe_audio_duration(source_path), source_path.name)
 
     started = time.perf_counter()
     wav_path.parent.mkdir(parents=True, exist_ok=True)

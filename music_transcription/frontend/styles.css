@@ -124,27 +124,6 @@ input:focus-visible,
   box-shadow: 0 0 12px var(--acid);
 }
 
-.topbar-actions {
-  display: flex;
-  align-items: center;
-  gap: 18px;
-}
-
-.logout-button {
-  padding: 7px 10px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  color: var(--muted);
-  background: transparent;
-  font-size: 10px;
-  cursor: pointer;
-}
-
-.logout-button:hover {
-  color: var(--ink);
-  border-color: #555a53;
-}
-
 main {
   padding: 74px 0 44px;
 }
@@ -203,95 +182,6 @@ h1 {
 .upload-card,
 .job-card {
   padding: 36px;
-}
-
-.auth-card {
-  min-height: 540px;
-  grid-column: 1 / -1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  padding: 50px 24px;
-  text-align: center;
-}
-
-.auth-lock {
-  width: 52px;
-  height: 52px;
-  display: grid;
-  place-items: center;
-  margin-bottom: 24px;
-  border: 1px solid #41463e;
-  background: var(--acid-dark);
-  color: var(--acid);
-}
-
-.auth-lock svg {
-  width: 23px;
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 1.45;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-}
-
-.auth-copy {
-  max-width: 450px;
-  margin: 14px 0 26px;
-  color: var(--muted);
-  font-size: 13px;
-  line-height: 1.65;
-}
-
-.auth-form {
-  width: min(100%, 430px);
-  text-align: left;
-}
-
-.auth-form > label {
-  display: block;
-  margin-bottom: 8px;
-  color: #d7d8d2;
-  font-size: 11px;
-}
-
-.auth-input-row {
-  display: flex;
-}
-
-.auth-input-row input {
-  min-width: 0;
-  height: 46px;
-  flex: 1;
-  padding: 0 13px;
-  border: 1px solid var(--line);
-  border-right: 0;
-  border-radius: var(--radius) 0 0 var(--radius);
-  color: var(--ink);
-  background: #10120f;
-}
-
-.auth-input-row button {
-  width: 96px;
-  border: 0;
-  border-radius: 0 var(--radius) var(--radius) 0;
-  color: #11150c;
-  background: var(--acid);
-  font-size: 11px;
-  font-weight: 700;
-  cursor: pointer;
-}
-
-.auth-input-row button:disabled {
-  filter: saturate(0.25);
-  cursor: wait;
-}
-
-.auth-note {
-  margin: 18px 0 0;
-  color: var(--faint);
-  font-size: 10px;
 }
 
 .upload-card {

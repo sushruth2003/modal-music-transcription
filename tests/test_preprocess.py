@@ -7,6 +7,7 @@ import pytest
 
 from music_transcription.preprocess import (
     audio_duration_path,
+    enforce_audio_duration_limit,
     normalize_audio_file,
 )
 
@@ -39,3 +40,10 @@ def test_normalize_rejects_unsupported_suffix_before_ffmpeg(tmp_path) -> None:
     source_path.write_text("not audio", encoding="utf-8")
     with pytest.raises(ValueError, match="Unsupported source suffix"):
         normalize_audio_file(source_path, tmp_path / "normalized.wav")
+
+
+def test_public_demo_rejects_audio_over_ten_minutes() -> None:
+    enforce_audio_duration_limit(600.0, "ten-minutes.wav")
+
+    with pytest.raises(ValueError, match="public demo limit is 10 minutes"):
+        enforce_audio_duration_limit(600.01, "too-long.wav")
