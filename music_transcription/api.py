@@ -689,7 +689,7 @@ def create_web_app(*, enforce_submission_limits: bool = True) -> FastAPI:
     max_inputs=WEB_MAX_CONCURRENT_INPUTS,
     target_inputs=WEB_TARGET_CONCURRENT_INPUTS,
 )
-@modal.asgi_app()
+@modal.asgi_app(label="transcribe")
 def web() -> Any:
     """Expose the public M2 application from a CPU-only Modal container."""
 

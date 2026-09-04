@@ -176,7 +176,8 @@ the underlying transcription model, not the name of the application.
 The URL printed by `modal deploy` is already a public HTTPS endpoint and is the
 simplest way to share this small beta. The app uses one GPU worker at a time,
 scales GPU and beat workers to zero after 30 idle seconds, and uses the quota
-rules above to limit accidental use.
+rules above to limit accidental use. Its explicit `transcribe` endpoint label
+keeps the generated URL short and stable across deployments.
 
 For a real $10 ceiling, set a $10 Workspace budget in Modal's Usage & Billing
 settings in addition to the app guard. The app guard cannot measure startup,
