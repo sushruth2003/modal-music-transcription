@@ -25,7 +25,6 @@ class SerializedEvent(TypedDict):
 
 JobState = Literal[
     "submitted",
-    "fetching",
     "preprocessing",
     "transcribing",
     "rendering",
@@ -51,7 +50,6 @@ class JobSpec(TypedDict):
     source_name: str
     source_suffix: str
     instruments: list[str] | None
-    source_url: NotRequired[str]
     generate_score: NotRequired[bool]
 
 
@@ -60,7 +58,6 @@ class JobRecord(TypedDict):
     state: JobState
     source_name: str
     instruments: list[str] | None
-    source_kind: Literal["upload", "url"]
     generate_score: bool
     paths: JobPaths
     created_at: str

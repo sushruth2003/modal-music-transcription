@@ -23,6 +23,7 @@ from music_transcription.config import (
     FRONTEND_MOUNT_PATH,
     L4_PRICE_PER_SECOND_USD,
     MAX_INSTRUMENT_HINTS,
+    SUPPORTED_VIDEO_SUFFIXES,
     WEB_MAX_CONCURRENT_INPUTS,
     WEB_MAX_CONTAINERS,
     WEB_MAX_UPLOAD_BYTES,
@@ -32,17 +33,14 @@ from music_transcription.config import (
     WEB_TARGET_CONCURRENT_INPUTS,
     WEB_UPLOAD_CHUNK_BYTES,
 )
-from music_transcription.ingest import validate_media_url
 from music_transcription.preprocess import process_job
 from music_transcription.resources import app, artifact_volume, rate_limit_states, web_image
 from music_transcription.schemas import JobRecord, JobSpec, SerializedEvent
 from music_transcription.storage import (
     get_job,
     new_job_spec,
-    new_url_job_spec,
     parse_instruments,
     stage_job_sources,
-    stage_url_job,
     update_job,
 )
 
@@ -50,7 +48,6 @@ LOCAL_FRONTEND_PATH = Path(__file__).parent / "frontend"
 TERMINAL_STATES = frozenset({"completed", "failed"})
 STATE_PROGRESS = {
     "submitted": 10,
-    "fetching": 20,
     "preprocessing": 30,
     "transcribing": 65,
     "rendering": 88,
@@ -144,10 +141,10 @@ def copy_limited(source: BinaryIO, destination: Path, max_bytes: int) -> int:
         while chunk := source.read(WEB_UPLOAD_CHUNK_BYTES):
             total += len(chunk)
             if total > max_bytes:
-                raise UploadTooLargeError(f"Audio files are limited to {max_bytes} bytes")
+                raise UploadTooLargeError(f"Media files are limited to {max_bytes} bytes")
             output.write(chunk)
     if total == 0:
-        raise ValueError("The uploaded audio file is empty")
+        raise ValueError("The uploaded media file is empty")
     return total
 
 
@@ -271,7 +268,6 @@ def public_job_record(record: JobRecord) -> dict[str, object]:
         "progress": STATE_PROGRESS[record["state"]],
         "source_name": record["source_name"],
         "instruments": record["instruments"],
-        "source_kind": record.get("source_kind", "upload"),
         "generate_score": record.get("generate_score", False),
         "created_at": record["created_at"],
         "updated_at": record["updated_at"],
@@ -310,7 +306,7 @@ def create_web_app(*, enforce_submission_limits: bool = True) -> FastAPI:
 
     web_app = FastAPI(
         title="Auto Transcribe API",
-        description="Asynchronous audio-to-MIDI transcription",
+        description="Asynchronous audio/video-to-MIDI transcription",
         version="0.3.0",
     )
     submission_lock = asyncio.Lock()
@@ -395,55 +391,38 @@ def create_web_app(*, enforce_submission_limits: bool = True) -> FastAPI:
     @web_app.post("/transcriptions", status_code=status.HTTP_202_ACCEPTED)
     async def submit_transcription(
         request: Request,
-        audio: Annotated[UploadFile | None, File()] = None,
-        source_url: Annotated[str | None, Form()] = None,
+        media: Annotated[UploadFile | None, File()] = None,
         instruments: Annotated[str | None, Form()] = None,
         generate_score: Annotated[bool, Form()] = False,
     ) -> JSONResponse:
-        normalized_url = source_url.strip() if source_url else None
-        if (audio is None) == (normalized_url is None):
-            raise HTTPException(
-                status_code=400,
-                detail="Provide exactly one source: an upload or a public YouTube URL",
-            )
+        if media is None:
+            raise HTTPException(status_code=400, detail="Upload one audio or video file")
 
         try:
             hints = validate_instruments(instruments)
-            if audio is not None:
-                content_length = request.headers.get("content-length")
-                if (
-                    content_length
-                    and content_length.isdigit()
-                    and int(content_length) > WEB_MAX_UPLOAD_BYTES + WEB_UPLOAD_CHUNK_BYTES
-                ):
-                    raise UploadTooLargeError("Audio upload is too large")
-                if not audio.filename:
-                    raise ValueError("The upload needs a filename")
-                await audio.seek(0)
-                spec, source_bytes = await asyncio.to_thread(
-                    stage_uploaded_file,
-                    audio.file,
-                    audio.filename,
-                    hints,
-                    generate_score,
-                )
-            else:
-                assert normalized_url is not None
-                safe_url = validate_media_url(normalized_url)
-                spec = new_url_job_spec(
-                    safe_url,
-                    hints,
-                    generate_score=generate_score,
-                )
-                await asyncio.to_thread(stage_url_job, spec)
-                source_bytes = None
+            content_length = request.headers.get("content-length")
+            if (
+                content_length
+                and content_length.isdigit()
+                and int(content_length) > WEB_MAX_UPLOAD_BYTES + WEB_UPLOAD_CHUNK_BYTES
+            ):
+                raise UploadTooLargeError("Media upload is too large")
+            if not media.filename:
+                raise ValueError("The upload needs a filename")
+            await media.seek(0)
+            spec, source_bytes = await asyncio.to_thread(
+                stage_uploaded_file,
+                media.file,
+                media.filename,
+                hints,
+                generate_score,
+            )
         except UploadTooLargeError as error:
             raise HTTPException(status_code=413, detail=str(error)) from error
         except ValueError as error:
             raise HTTPException(status_code=400, detail=str(error)) from error
         finally:
-            if audio is not None:
-                await audio.close()
+            await media.close()
 
         try:
             call_id = await asyncio.to_thread(spawn_process_job, spec)
@@ -462,14 +441,12 @@ def create_web_app(*, enforce_submission_limits: bool = True) -> FastAPI:
         content: dict[str, object] = {
             "job_id": job_id,
             "state": "submitted",
-            "source_kind": "url" if normalized_url else "upload",
             "generate_score": generate_score,
             "function_call_id": call_id,
             "status_url": f"/transcriptions/{job_id}",
             "result_url": f"/jobs/{job_id}",
         }
-        if source_bytes is not None:
-            content["source_bytes"] = source_bytes
+        content["source_bytes"] = source_bytes
         return JSONResponse(
             status_code=status.HTTP_202_ACCEPTED,
             content=content,
@@ -565,13 +542,20 @@ def create_web_app(*, enforce_submission_limits: bool = True) -> FastAPI:
     @web_app.get("/transcriptions/{job_id}/audio")
     async def transcription_audio(job_id: str) -> Response:
         record = await lookup_job(job_id)
-        payload = await artifact(record, "source")
-        media_type = mimetypes.guess_type(record["source_name"])[0] or "application/octet-stream"
+        source_suffix = Path(record["paths"]["source"]).suffix.lower()
+        if source_suffix in SUPPORTED_VIDEO_SUFFIXES:
+            payload = await artifact(record, "normalized")
+            playback_name = f"{Path(record['source_name']).stem}.wav"
+            media_type = "audio/wav"
+        else:
+            payload = await artifact(record, "source")
+            playback_name = record["source_name"]
+            media_type = mimetypes.guess_type(playback_name)[0] or "application/octet-stream"
         return Response(
             content=payload,
             media_type=media_type,
             headers={
-                "Content-Disposition": content_disposition(record["source_name"], "inline"),
+                "Content-Disposition": content_disposition(playback_name, "inline"),
                 "Accept-Ranges": "none",
             },
         )

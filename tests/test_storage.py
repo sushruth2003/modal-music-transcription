@@ -27,20 +27,16 @@ def test_new_job_spec_and_paths(monkeypatch) -> None:
     )
 
 
-def test_url_job_spec_uses_stable_flac_source(monkeypatch) -> None:
+def test_video_job_spec_and_paths(monkeypatch) -> None:
     class FixedUuid:
         hex = "c" * 32
 
     monkeypatch.setattr(storage, "uuid4", lambda: FixedUuid())
-    spec = storage.new_url_job_spec(
-        "https://youtu.be/example",
-        None,
-        generate_score=True,
-    )
+    spec = storage.new_job_spec("performance.MP4", None, generate_score=True)
     record = storage.initial_job_record(spec)
 
-    assert spec["source_suffix"] == ".flac"
-    assert record["source_kind"] == "url"
+    assert spec["source_suffix"] == ".mp4"
+    assert record["paths"]["source"].endswith("/source.mp4")
     assert record["generate_score"] is True
 
 

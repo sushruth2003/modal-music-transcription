@@ -5,11 +5,11 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta
       name="description"
-      content="Turn an uploaded or linked music recording into MIDI and readable sheet music."
+      content="Turn an uploaded audio or video recording into MIDI and readable sheet music."
     />
     <title>Auto Transcribe</title>
     <link rel="stylesheet" href="/styles.css?v=20260904-1" />
-    <script src="/app.js?v=20260904-2" defer></script>
+    <script src="/app.js?v=20260904-3" defer></script>
   </head>
   <body>
     <div class="shell">
@@ -28,8 +28,8 @@
           <p class="eyebrow">Recording → note events → MIDI or score</p>
           <h1 id="page-title">Hear the structure<br />inside the song.</h1>
           <p class="lede">
-            Upload a recording or import a public YouTube video. Auto Transcribe turns its musical events
-            into an instrument-aware piano roll, MIDI, and optional sheet music.
+            Upload an audio or video recording. Auto Transcribe extracts its musical events into an
+            instrument-aware piano roll, MIDI, and optional sheet music.
           </p>
         </section>
 
@@ -43,41 +43,21 @@
               </div>
             </div>
 
-            <div class="choice-tabs" role="group" aria-label="Recording source">
-              <button type="button" class="active" data-input-mode="upload">Upload file</button>
-              <button type="button" data-input-mode="url">Paste URL</button>
-            </div>
-
             <label id="drop-zone" class="drop-zone" for="audio-file">
               <input
                 id="audio-file"
-                name="audio"
+                name="media"
                 type="file"
-                accept="audio/wav,audio/flac,audio/mpeg,audio/mp4,audio/ogg,.wav,.flac,.mp3,.m4a,.ogg"
+                accept="audio/wav,audio/flac,audio/mpeg,audio/mp4,audio/ogg,video/mp4,video/quicktime,video/webm,.wav,.flac,.mp3,.m4a,.ogg,.mp4,.mov,.webm,.mkv"
               />
               <span class="drop-icon" aria-hidden="true">
                 <svg viewBox="0 0 24 24" role="img">
                   <path d="M12 16V4m0 0L7.5 8.5M12 4l4.5 4.5M5 14v4a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-4" />
                 </svg>
               </span>
-              <span class="drop-title" id="file-label">Drop audio here</span>
-              <span class="drop-copy">or browse · WAV, FLAC, MP3, M4A, OGG · 100 MB max</span>
+              <span class="drop-title" id="file-label">Drop audio or video here</span>
+              <span class="drop-copy">or browse · audio, MP4, MOV, WebM, MKV · 100 MB · 10 min max</span>
             </label>
-
-            <div id="url-source" class="url-source" hidden>
-              <label class="field" for="source-url">
-                <span>Public YouTube URL</span>
-                <input
-                  id="source-url"
-                  name="source_url"
-                  type="url"
-                  inputmode="url"
-                  placeholder="https://youtube.com/watch?v=…"
-                  autocomplete="url"
-                />
-              </label>
-              <p>Public YouTube videos only. Playlists, live, private, age-restricted, and login-only videos are not supported.</p>
-            </div>
 
             <label class="field" for="instruments">
               <span>Instrument hints <small>optional</small></span>
@@ -135,7 +115,6 @@
               </div>
               <ol class="stage-list" aria-label="Transcription stages">
                 <li data-stage="submitted"><span></span>Submitted</li>
-                <li data-stage="fetching"><span></span>Media imported</li>
                 <li data-stage="preprocessing"><span></span>Audio normalized</li>
                 <li data-stage="transcribing"><span></span>GPU transcription</li>
                 <li data-stage="rendering"><span></span>Score rendered</li>
@@ -186,14 +165,14 @@
                   <input id="timeline" type="range" min="0" max="1000" value="0" aria-label="Playback position" />
                 </div>
                 <div class="source-switch" role="group" aria-label="Choose playback version">
-                  <button type="button" class="active" data-mode="source">Original audio</button>
+                  <button type="button" class="active" data-mode="source">Source audio</button>
                   <button type="button" data-mode="synth">Transcription preview</button>
                 </div>
                 <audio id="source-audio" preload="metadata"></audio>
               </div>
               <p class="playback-help">
-                Original audio is the submitted recording. Transcription preview is a synthesized playback of
-                the detected notes—not isolated audio from the recording.
+                Source audio is the submitted audio, or the normalized audio extracted from an uploaded video.
+                Transcription preview is synthesized from the detected notes.
               </p>
               <p id="score-help" class="score-help" hidden>
                 Sheet music is automatically quantized from model-generated MIDI. Treat it as an editable draft, not publication-ready engraving.

@@ -31,19 +31,8 @@ AUDIO_SAMPLE_RATE = 16_000
 MAX_AUDIO_SECONDS = 10 * 60
 MAX_M1_BATCH_FILES = 4
 SUPPORTED_AUDIO_SUFFIXES = frozenset({".flac", ".m4a", ".mp3", ".ogg", ".wav"})
-URL_SOURCE_SUFFIX = ".flac"
-SUPPORTED_YOUTUBE_HOSTS = frozenset(
-    {
-        "youtube.com",
-        "www.youtube.com",
-        "m.youtube.com",
-        "music.youtube.com",
-        "youtu.be",
-    }
-)
-URL_DOWNLOAD_PACKAGE = "yt-dlp[default]==2026.8.19"
-DENO_VERSION = "2.9.6"
-URL_DOWNLOAD_TIMEOUT_SECONDS = 10 * 60
+SUPPORTED_VIDEO_SUFFIXES = frozenset({".mkv", ".mov", ".mp4", ".webm"})
+SUPPORTED_SOURCE_SUFFIXES = SUPPORTED_AUDIO_SUFFIXES | SUPPORTED_VIDEO_SUFFIXES
 
 FASTAPI_PACKAGE = "fastapi==0.141.1"
 MULTIPART_PACKAGE = "python-multipart==0.0.32"

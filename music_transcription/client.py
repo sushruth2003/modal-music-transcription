@@ -9,17 +9,14 @@ from pathlib import Path
 
 import modal
 
-from music_transcription.config import APP_NAME, MAX_M1_BATCH_FILES, SUPPORTED_AUDIO_SUFFIXES
-from music_transcription.ingest import validate_media_url
+from music_transcription.config import APP_NAME, MAX_M1_BATCH_FILES, SUPPORTED_SOURCE_SUFFIXES
 from music_transcription.resources import artifact_volume
 from music_transcription.schemas import JobRecord, JobSpec
 from music_transcription.storage import (
     get_job,
     new_job_spec,
-    new_url_job_spec,
     parse_instruments,
     stage_job_sources,
-    stage_url_job,
 )
 
 TERMINAL_STATES = frozenset({"completed", "failed"})
@@ -28,10 +25,10 @@ TERMINAL_STATES = frozenset({"completed", "failed"})
 def validate_source(value: str) -> Path:
     path = Path(value).expanduser().resolve()
     if not path.is_file():
-        raise ValueError(f"Audio file does not exist: {path}")
-    if path.suffix.lower() not in SUPPORTED_AUDIO_SUFFIXES:
-        supported = ", ".join(sorted(SUPPORTED_AUDIO_SUFFIXES))
-        raise ValueError(f"Unsupported audio type {path.suffix!r}; expected one of: {supported}")
+        raise ValueError(f"Media file does not exist: {path}")
+    if path.suffix.lower() not in SUPPORTED_SOURCE_SUFFIXES:
+        supported = ", ".join(sorted(SUPPORTED_SOURCE_SUFFIXES))
+        raise ValueError(f"Unsupported media type {path.suffix!r}; expected one of: {supported}")
     return path
 
 
@@ -45,13 +42,13 @@ def discover_sources(directory: str, limit: int) -> list[Path]:
     sources = sorted(
         path
         for path in root.iterdir()
-        if path.is_file() and path.suffix.lower() in SUPPORTED_AUDIO_SUFFIXES
+        if path.is_file() and path.suffix.lower() in SUPPORTED_SOURCE_SUFFIXES
     )
     if not sources:
-        raise ValueError(f"No supported audio files found in {root}")
+        raise ValueError(f"No supported media files found in {root}")
     if len(sources) > limit:
         raise ValueError(
-            f"Found {len(sources)} audio files but --limit is {limit}; "
+            f"Found {len(sources)} media files but --limit is {limit}; "
             "raise the limit deliberately or use a smaller directory"
         )
     return sources
@@ -63,11 +60,10 @@ def upload_sources(
     *,
     generate_score: bool = False,
 ) -> list[JobSpec]:
-    """Upload source audio and immutable request metadata in one Volume commit."""
+    """Upload source media and immutable request metadata in one Volume commit."""
 
     specs = [
-        new_job_spec(source.name, instruments, generate_score=generate_score)
-        for source in sources
+        new_job_spec(source.name, instruments, generate_score=generate_score) for source in sources
     ]
     stage_job_sources(sources, specs)
     return specs
@@ -98,28 +94,17 @@ def print_submission(specs: list[JobSpec], call_id: str | None = None) -> None:
 
 
 def submit_one(
-    audio: str | None,
-    source_url: str | None,
+    media: str,
     instruments: str | None,
     generate_score: bool,
     wait: bool,
 ) -> None:
     hints = parse_instruments(instruments)
-    if source_url is not None:
-        spec = new_url_job_spec(
-            validate_media_url(source_url),
-            hints,
-            generate_score=generate_score,
-        )
-        stage_url_job(spec)
-        specs = [spec]
-    else:
-        assert audio is not None
-        specs = upload_sources(
-            [validate_source(audio)],
-            hints,
-            generate_score=generate_score,
-        )
+    specs = upload_sources(
+        [validate_source(media)],
+        hints,
+        generate_score=generate_score,
+    )
     process_job = modal.Function.from_name(APP_NAME, "process_job")
     call = process_job.spawn(specs[0])
     print_submission(specs, call.object_id)
@@ -176,15 +161,13 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Durable MuScriptor jobs on Modal")
     commands = parser.add_subparsers(dest="command", required=True)
 
-    submit = commands.add_parser("submit", help="submit one audio file or public YouTube URL")
-    source = submit.add_mutually_exclusive_group(required=True)
-    source.add_argument("--audio")
-    source.add_argument("--url")
+    submit = commands.add_parser("submit", help="submit one audio or video file")
+    submit.add_argument("--media", required=True)
     submit.add_argument("--instruments")
     submit.add_argument("--score", action="store_true", help="also render PDF and MusicXML")
     submit.add_argument("--wait", action="store_true")
 
-    batch = commands.add_parser("submit-batch", help="submit one directory of audio files")
+    batch = commands.add_parser("submit-batch", help="submit one directory of media files")
     batch.add_argument("--directory", required=True)
     batch.add_argument("--instruments")
     batch.add_argument("--limit", type=int, default=MAX_M1_BATCH_FILES)
@@ -203,7 +186,7 @@ def build_parser() -> argparse.ArgumentParser:
 def main() -> None:
     args = build_parser().parse_args()
     if args.command == "submit":
-        submit_one(args.audio, args.url, args.instruments, args.score, args.wait)
+        submit_one(args.media, args.instruments, args.score, args.wait)
     elif args.command == "submit-batch":
         submit_batch(args.directory, args.instruments, args.limit, args.score, args.wait)
     elif args.command == "status":

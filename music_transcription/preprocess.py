@@ -13,9 +13,8 @@ from music_transcription.config import (
     ARTIFACT_MOUNT_PATH,
     AUDIO_SAMPLE_RATE,
     MAX_AUDIO_SECONDS,
-    SUPPORTED_AUDIO_SUFFIXES,
+    SUPPORTED_SOURCE_SUFFIXES,
 )
-from music_transcription.ingest import fetch_media_url
 from music_transcription.resources import app, artifact_volume, audio_image
 from music_transcription.schemas import JobSpec, PreprocessingMetrics
 from music_transcription.score import render_score
@@ -73,7 +72,7 @@ def normalize_audio_file(source_path: Path, wav_path: Path) -> tuple[float, Prep
     """Normalize one filesystem input directly to another without a byte payload."""
 
     suffix = source_path.suffix.lower()
-    if suffix not in SUPPORTED_AUDIO_SUFFIXES:
+    if suffix not in SUPPORTED_SOURCE_SUFFIXES:
         raise ValueError(f"Unsupported source suffix: {suffix!r}")
 
     enforce_audio_duration_limit(probe_audio_duration(source_path), source_path.name)
@@ -131,13 +130,7 @@ def process_job(spec: JobSpec) -> dict[str, object]:
     paths = job_paths(job_id, spec["source_suffix"])
 
     try:
-        source_url = spec.get("source_url")
-        if source_url:
-            update_job(job_id, "fetching")
-            source = fetch_media_url.remote(job_id, spec["source_suffix"], source_url)
-            update_job(job_id, "preprocessing", source_name=source["source_name"])
-        else:
-            update_job(job_id, "preprocessing")
+        update_job(job_id, "preprocessing")
 
         artifact_volume.reload()
         source_path = mounted_artifact_path(paths["source"])

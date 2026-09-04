@@ -80,7 +80,7 @@ def test_submit_returns_accepted_job_handle(monkeypatch) -> None:
 
     response = client.post(
         "/transcriptions",
-        files={"audio": ("demo.wav", b"audio", "audio/wav")},
+        files={"media": ("demo.wav", b"audio", "audio/wav")},
         data={"instruments": "piano"},
     )
 
@@ -91,7 +91,6 @@ def test_submit_returns_accepted_job_handle(monkeypatch) -> None:
     assert response.json() == {
         "job_id": JOB_ID,
         "state": "submitted",
-        "source_kind": "upload",
         "generate_score": False,
         "source_bytes": 5,
         "function_call_id": "fc-123",
@@ -100,47 +99,39 @@ def test_submit_returns_accepted_job_handle(monkeypatch) -> None:
     }
 
 
-def test_submit_accepts_public_url_and_score_option(monkeypatch) -> None:
+def test_submit_accepts_video_and_score_option(monkeypatch) -> None:
     spec = {
         "job_id": JOB_ID,
-        "source_name": "remote-media.flac",
-        "source_suffix": ".flac",
-        "source_url": "https://youtu.be/example",
+        "source_name": "performance.mp4",
+        "source_suffix": ".mp4",
         "instruments": None,
         "generate_score": True,
     }
-    staged = []
-    monkeypatch.setattr(api, "new_url_job_spec", lambda *_args, **_kwargs: spec)
-    monkeypatch.setattr(api, "stage_url_job", staged.append)
-    monkeypatch.setattr(api, "spawn_process_job", lambda _spec: "fc-url")
+    monkeypatch.setattr(api, "stage_uploaded_file", lambda *_args: (spec, 9))
+    monkeypatch.setattr(api, "spawn_process_job", lambda _spec: "fc-video")
     monkeypatch.setattr(api, "reserve_submission", lambda _client_ip: ALLOW_SUBMISSION)
     client = TestClient(api.create_web_app())
 
     response = client.post(
         "/transcriptions",
-        data={"source_url": "https://youtu.be/example", "generate_score": "true"},
+        files={"media": ("performance.mp4", b"video", "video/mp4")},
+        data={"generate_score": "true"},
     )
 
     assert response.status_code == 202
-    assert staged == [spec]
-    assert response.json()["source_kind"] == "url"
     assert response.json()["generate_score"] is True
-    assert "source_bytes" not in response.json()
+    assert response.json()["source_bytes"] == 9
 
 
-def test_submit_rejects_missing_or_ambiguous_source(monkeypatch) -> None:
+def test_submit_rejects_missing_file_and_removed_url_input(monkeypatch) -> None:
     monkeypatch.setattr(api, "reserve_submission", lambda _client_ip: ALLOW_SUBMISSION)
     client = TestClient(api.create_web_app())
 
     missing = client.post("/transcriptions", data={})
-    ambiguous = client.post(
-        "/transcriptions",
-        files={"audio": ("demo.wav", b"audio", "audio/wav")},
-        data={"source_url": "https://youtu.be/example"},
-    )
+    old_url_input = client.post("/transcriptions", data={"source_url": "https://youtu.be/example"})
 
     assert missing.status_code == 400
-    assert ambiguous.status_code == 400
+    assert old_url_input.status_code == 400
 
 
 def test_status_and_piano_roll_endpoints(monkeypatch) -> None:
@@ -198,6 +189,27 @@ def test_score_artifact_endpoints_are_conditional(monkeypatch) -> None:
     assert "musicxml" in musicxml.headers["content-type"]
 
 
+def test_video_playback_serves_extracted_audio(monkeypatch) -> None:
+    record = completed_record()
+    record["source_name"] = "performance.mp4"
+    record["paths"]["source"] = f"jobs/{JOB_ID}/source.mp4"
+    requested_paths = []
+    monkeypatch.setattr(api, "get_job", lambda _job_id: record)
+    monkeypatch.setattr(
+        api,
+        "read_artifact_bytes",
+        lambda path: requested_paths.append(path) or b"RIFF",
+    )
+    client = TestClient(api.create_web_app())
+
+    response = client.get(f"/transcriptions/{JOB_ID}/audio")
+
+    assert response.status_code == 200
+    assert requested_paths == [record["paths"]["normalized"]]
+    assert response.headers["content-type"] == "audio/wav"
+    assert "performance.wav" in response.headers["content-disposition"]
+
+
 def test_job_page_and_health_are_served() -> None:
     client = TestClient(api.create_web_app())
 
@@ -206,12 +218,12 @@ def test_job_page_and_health_are_served() -> None:
     page = client.get(f"/jobs/{JOB_ID}")
     assert page.status_code == 200
     assert "Auto Transcribe" in page.text
-    assert "Original audio" in page.text
+    assert "Source audio" in page.text
     assert "Transcription preview" in page.text
-    assert "Paste URL" in page.text
+    assert "Drop audio or video here" in page.text
+    assert "Paste URL" not in page.text
     assert "MIDI + score" in page.text
-    assert "/app.js?v=20260904-2" in page.text
-    assert "Public YouTube videos only" in page.text
+    assert "/app.js?v=20260904-3" in page.text
 
 
 def test_rate_limit_allows_three_hourly_submissions_then_rejects() -> None:

@@ -197,7 +197,7 @@ async def run_job(
     try:
         response = await client.post(
             urljoin(f"{base_url}/", "transcriptions"),
-            files={"audio": (audio_name, audio_bytes, media_type)},
+            files={"media": (audio_name, audio_bytes, media_type)},
             data={} if instruments is None else {"instruments": instruments},
         )
     except httpx.HTTPError as error:

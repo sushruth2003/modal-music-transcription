@@ -11,14 +11,16 @@ def test_parse_instruments() -> None:
     assert parse_instruments(" , ") is None
 
 
-def test_discover_sources_is_sorted_and_filters_non_audio(tmp_path) -> None:
+def test_discover_sources_is_sorted_and_filters_unsupported_files(tmp_path) -> None:
     (tmp_path / "b.wav").write_bytes(b"b")
     (tmp_path / "a.mp3").write_bytes(b"a")
+    (tmp_path / "c.mp4").write_bytes(b"c")
     (tmp_path / "notes.txt").write_text("ignore", encoding="utf-8")
 
-    assert [path.name for path in discover_sources(str(tmp_path), limit=2)] == [
+    assert [path.name for path in discover_sources(str(tmp_path), limit=3)] == [
         "a.mp3",
         "b.wav",
+        "c.mp4",
     ]
 
 
@@ -37,3 +39,7 @@ def test_validate_source(tmp_path) -> None:
 
     with pytest.raises(ValueError, match="does not exist"):
         validate_source(str(tmp_path / "missing.wav"))
+
+    video = tmp_path / "performance.WEBM"
+    video.write_bytes(b"video")
+    assert validate_source(str(video)) == video.resolve()
