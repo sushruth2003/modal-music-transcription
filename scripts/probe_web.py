@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import io
+import time
 import wave
 from urllib.parse import urlparse
 
@@ -94,7 +95,44 @@ def install_result_fixture(page) -> None:
     page.route("**/transcriptions/**", handle)
 
 
-def run_probe(base_url: str, *, headed: bool) -> None:
+def exercise_source_seek(page, base_url: str, job_id: str) -> float:
+    """Verify a real completed job serves ranges and keeps playing after a seek."""
+
+    status_response = page.request.get(f"{base_url}/transcriptions/{job_id}")
+    assert status_response.ok
+    job = status_response.json()
+    assert job["state"] == "completed"
+
+    range_response = page.request.get(
+        f"{base_url}{job['links']['audio']}",
+        headers={"Range": "bytes=100-199"},
+    )
+    assert range_response.status == 206
+    assert range_response.headers["content-range"].startswith("bytes 100-199/")
+    assert range_response.headers["cache-control"] == "private, max-age=3600, immutable"
+    assert len(range_response.body()) == 100
+
+    page.goto(f"{base_url}/jobs/{job_id}", wait_until="networkidle")
+    expect(page.get_by_text("Transcription complete")).to_be_visible(timeout=30_000)
+    page.wait_for_function("document.querySelector('#source-audio').readyState >= 1")
+    page.locator("#play-button").click()
+    page.wait_for_function("document.querySelector('#source-audio').currentTime > 0.1")
+
+    duration = page.locator("#source-audio").evaluate("element => element.duration")
+    target = duration * 0.7
+    started = time.monotonic()
+    page.locator("#timeline").evaluate(
+        "element => { element.value = '700'; element.dispatchEvent(new Event('input', { bubbles: true })); }"
+    )
+    page.wait_for_function(
+        "target => document.querySelector('#source-audio').currentTime > target + 0.25",
+        arg=target,
+        timeout=10_000,
+    )
+    return time.monotonic() - started
+
+
+def run_probe(base_url: str, *, headed: bool, job_id: str | None = None) -> None:
     base_url = base_url.rstrip("/")
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch(headless=not headed)
@@ -114,19 +152,24 @@ def run_probe(base_url: str, *, headed: bool) -> None:
         ).to_be_visible()
         expect(page.get_by_role("heading", name="Align notes to the beat grid")).to_be_visible()
 
-        install_result_fixture(page)
-        page.goto(f"{base_url}/jobs/{MOCK_JOB_ID}", wait_until="networkidle")
+        if job_id is None:
+            install_result_fixture(page)
+        result_job_id = job_id or MOCK_JOB_ID
+        page.goto(f"{base_url}/jobs/{result_job_id}", wait_until="networkidle")
         expect(page.get_by_text("Transcription complete")).to_be_visible()
-        expect(page.get_by_role("link", name="View score")).to_be_visible()
         expect(page.get_by_role("link", name="MIDI")).to_be_visible()
         assert page.get_by_text("MusicXML").count() == 0
-        page.wait_for_function("document.querySelector('#source-audio').readyState >= 1")
-        page.locator("#timeline").evaluate(
-            "element => { element.value = '700'; element.dispatchEvent(new Event('input', { bubbles: true })); }"
-        )
-        page.wait_for_function("document.querySelector('#source-audio').currentTime > 2.5")
-        current_time = page.locator("#source-audio").evaluate("element => element.currentTime")
-        assert 2.5 < current_time < 3.2
+        if job_id is None:
+            expect(page.get_by_role("link", name="View score")).to_be_visible()
+            page.wait_for_function("document.querySelector('#source-audio').readyState >= 1")
+            page.locator("#timeline").evaluate(
+                "element => { element.value = '700'; element.dispatchEvent(new Event('input', { bubbles: true })); }"
+            )
+            page.wait_for_function("document.querySelector('#source-audio').currentTime > 2.5")
+            current_time = page.locator("#source-audio").evaluate("element => element.currentTime")
+            assert 2.5 < current_time < 3.2
+
+        seek_seconds = exercise_source_seek(page, base_url, job_id) if job_id else None
 
         mobile = browser.new_page(viewport={"width": 390, "height": 844})
         mobile.goto(f"{base_url}/how-it-works", wait_until="networkidle")
@@ -136,15 +179,17 @@ def run_probe(base_url: str, *, headed: bool) -> None:
         assert mobile.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
         browser.close()
 
-    print(f"Playwright probe passed: {base_url}")
+    suffix = f"; live source seek resumed in {seek_seconds:.2f}s" if seek_seconds else ""
+    print(f"Playwright probe passed: {base_url}{suffix}")
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--base-url", required=True)
     parser.add_argument("--headed", action="store_true")
+    parser.add_argument("--job-id", help="Exercise source seeking against a real completed job")
     args = parser.parse_args()
-    run_probe(args.base_url, headed=args.headed)
+    run_probe(args.base_url, headed=args.headed, job_id=args.job_id)
 
 
 if __name__ == "__main__":

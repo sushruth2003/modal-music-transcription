@@ -169,14 +169,17 @@ sequenceDiagram
 
 The web function is an I/O layer, not an inference server. `@modal.asgi_app`
 adapts FastAPI to Modal, while `@modal.concurrent` lets one CPU container handle
-multiple uploads, polls, and downloads. It uses the Volume client API instead of
-mounting the artifact Volume, avoiding filesystem reload conflicts between
-concurrent requests. The upload is first bounded and streamed through ephemeral
-disk, then committed with immutable request metadata. A persistent rate-limit
-Dict counts accepted submissions before FastAPI parses the upload body. One web
-container handles up to 25 concurrent requests, keeping the quota update
-serialized while status and artifact reads remain concurrent. Accepted jobs also
-reserve $0.25 from a shared $10 monthly app allowance. That intentionally
+multiple uploads, polls, and downloads. Uploads and small artifacts use the
+Volume client API. Source playback uses a read-only Volume mount so HTTP range
+requests read only the requested bytes instead of downloading the full recording
+on every seek. Mount reloads and range reads are briefly serialized, then the
+file is closed before the response is sent to avoid filesystem reload conflicts.
+The upload is first bounded and streamed through ephemeral disk, then committed
+with immutable request metadata. A persistent rate-limit Dict counts accepted
+submissions before FastAPI parses the upload body. One web container handles up
+to 25 concurrent requests, keeping quota updates and playback mount refreshes
+serialized while status and artifact reads remain concurrent. Accepted jobs
+also reserve $0.25 from a shared $10 monthly app allowance. That intentionally
 conservative estimate is an admission control, not a billing record.
 
 `process_job.spawn()` makes submission asynchronous: the HTTP request can end

@@ -215,8 +215,9 @@ def test_video_playback_serves_extracted_audio(monkeypatch) -> None:
     monkeypatch.setattr(api, "get_job", lambda _job_id: record)
     monkeypatch.setattr(
         api,
-        "read_artifact_bytes",
-        lambda path: requested_paths.append(path) or b"RIFF",
+        "read_mounted_audio_slice",
+        lambda path, _range, _visible: requested_paths.append(path)
+        or api.ArtifactSlice(b"RIFF", 4, 0, 3, False),
     )
     client = TestClient(api.create_web_app())
 
@@ -232,7 +233,16 @@ def test_video_playback_serves_extracted_audio(monkeypatch) -> None:
 def test_audio_playback_supports_byte_range_seeking(monkeypatch) -> None:
     record = completed_record()
     monkeypatch.setattr(api, "get_job", lambda _job_id: record)
-    monkeypatch.setattr(api, "read_artifact_bytes", lambda _path: b"0123456789")
+
+    def read_slice(_path, range_header, _visible):
+        payload = b"0123456789"
+        try:
+            start, end = api.parse_byte_range(range_header, len(payload))
+        except api.InvalidByteRangeError as error:
+            raise api.InvalidByteRangeError(str(error), total_bytes=len(payload)) from error
+        return api.ArtifactSlice(payload[start : end + 1], len(payload), start, end, True)
+
+    monkeypatch.setattr(api, "read_mounted_audio_slice", read_slice)
     client = TestClient(api.create_web_app())
 
     partial = client.get(
@@ -252,10 +262,26 @@ def test_audio_playback_supports_byte_range_seeking(monkeypatch) -> None:
     assert partial.content == b"3456"
     assert partial.headers["content-range"] == "bytes 3-6/10"
     assert partial.headers["content-length"] == "4"
+    assert partial.headers["cache-control"] == "private, max-age=3600, immutable"
+    assert partial.headers["etag"] == f'"{JOB_ID}-10"'
     assert suffix.status_code == 206
     assert suffix.content == b"89"
     assert invalid.status_code == 416
     assert invalid.headers["content-range"] == "bytes */10"
+
+
+def test_mounted_audio_reader_reads_only_the_requested_slice(monkeypatch, tmp_path) -> None:
+    source = tmp_path / "source.wav"
+    source.write_bytes(b"0123456789")
+    monkeypatch.setattr(api, "mounted_artifact_path", lambda _path: source)
+
+    artifact_slice = api.read_mounted_audio_slice(
+        "jobs/example/source.wav",
+        "bytes=3-6",
+        {"jobs/example/source.wav"},
+    )
+
+    assert artifact_slice == api.ArtifactSlice(b"3456", 10, 3, 6, True)
 
 
 def test_job_page_and_health_are_served() -> None:

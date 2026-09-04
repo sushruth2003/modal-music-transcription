@@ -20,6 +20,7 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from music_transcription.config import (
+    ARTIFACT_MOUNT_PATH,
     FRONTEND_MOUNT_PATH,
     L4_PRICE_PER_SECOND_USD,
     MUSCRIPTOR_INSTRUMENT_GROUPS,
@@ -40,6 +41,7 @@ from music_transcription.resources import app, artifact_volume, rate_limit_state
 from music_transcription.schemas import JobRecord, JobSpec, SerializedEvent
 from music_transcription.storage import (
     get_job,
+    mounted_artifact_path,
     new_job_spec,
     parse_instruments,
     stage_job_sources,
@@ -75,6 +77,21 @@ class RateLimitDecision:
 
 class InvalidByteRangeError(ValueError):
     """Raised when an HTTP byte range cannot be satisfied."""
+
+    def __init__(self, message: str, *, total_bytes: int | None = None) -> None:
+        super().__init__(message)
+        self.total_bytes = total_bytes
+
+
+@dataclass(frozen=True)
+class ArtifactSlice:
+    """One complete or ranged read from the mounted artifact Volume."""
+
+    content: bytes
+    total_bytes: int
+    start: int
+    end: int
+    partial: bool
 
 
 def parse_byte_range(header: str, total_bytes: int) -> tuple[int, int]:
@@ -267,6 +284,40 @@ def read_artifact_bytes(relative_path: str, max_bytes: int = WEB_MAX_UPLOAD_BYTE
     return b"".join(chunks)
 
 
+def read_mounted_audio_slice(
+    relative_path: str,
+    range_header: str | None,
+    visible_paths: set[str],
+) -> ArtifactSlice:
+    """Read only the requested audio bytes through the read-only Volume mount."""
+
+    local_path = mounted_artifact_path(relative_path)
+    if relative_path not in visible_paths or not local_path.is_file():
+        artifact_volume.reload()
+        if not local_path.is_file():
+            raise FileNotFoundError(relative_path)
+        visible_paths.add(relative_path)
+
+    total_bytes = local_path.stat().st_size
+    if range_header:
+        try:
+            start, end = parse_byte_range(range_header, total_bytes)
+        except InvalidByteRangeError as error:
+            raise InvalidByteRangeError(str(error), total_bytes=total_bytes) from error
+        partial = True
+    else:
+        start, end = 0, max(0, total_bytes - 1)
+        partial = False
+
+    length = max(0, end - start + 1)
+    with local_path.open("rb") as source:
+        source.seek(start)
+        content = source.read(length)
+    if len(content) != length:
+        raise OSError(f"Artifact read ended after {len(content)} of {length} requested bytes")
+    return ArtifactSlice(content, total_bytes, start, end, partial)
+
+
 def parse_event_stream(payload: bytes) -> list[SerializedEvent]:
     events: list[SerializedEvent] = []
     for line_number, line in enumerate(payload.splitlines(), start=1):
@@ -382,6 +433,8 @@ def create_web_app(*, enforce_submission_limits: bool = True) -> FastAPI:
         version="0.3.0",
     )
     submission_lock = asyncio.Lock()
+    audio_mount_lock = asyncio.Lock()
+    visible_audio_paths: set[str] = set()
 
     @web_app.middleware("http")
     async def limit_submissions(request: Request, call_next: Any) -> Response:
@@ -424,7 +477,9 @@ def create_web_app(*, enforce_submission_limits: bool = True) -> FastAPI:
                 )
 
         response = await call_next(request)
-        if request.url.path.startswith("/transcriptions"):
+        if request.url.path.startswith("/transcriptions") and not request.url.path.endswith(
+            "/audio"
+        ):
             response.headers["Cache-Control"] = "no-store"
         elif request.url.path in {
             "/",
@@ -626,41 +681,54 @@ def create_web_app(*, enforce_submission_limits: bool = True) -> FastAPI:
         record = await lookup_job(job_id)
         source_suffix = Path(record["paths"]["source"]).suffix.lower()
         if source_suffix in SUPPORTED_VIDEO_SUFFIXES:
-            payload = await artifact(record, "normalized")
+            relative_path = record["paths"]["normalized"]
             playback_name = f"{Path(record['source_name']).stem}.wav"
             media_type = "audio/wav"
         else:
-            payload = await artifact(record, "source")
+            relative_path = record["paths"]["source"]
             playback_name = record["source_name"]
             media_type = mimetypes.guess_type(playback_name)[0] or "application/octet-stream"
-        total_bytes = len(payload)
-        headers = {
-            "Content-Disposition": content_disposition(playback_name, "inline"),
-            "Accept-Ranges": "bytes",
-        }
+
         range_header = request.headers.get("range")
-        if not range_header:
-            headers["Content-Length"] = str(total_bytes)
-            return Response(content=payload, media_type=media_type, headers=headers)
         try:
-            start, end = parse_byte_range(range_header, total_bytes)
-        except InvalidByteRangeError:
+            async with audio_mount_lock:
+                artifact_slice = await asyncio.to_thread(
+                    read_mounted_audio_slice,
+                    relative_path,
+                    range_header,
+                    visible_audio_paths,
+                )
+        except InvalidByteRangeError as error:
+            total_bytes = error.total_bytes or 0
             return Response(
                 status_code=416,
                 headers={
-                    **headers,
+                    "Accept-Ranges": "bytes",
                     "Content-Range": f"bytes */{total_bytes}",
                     "Content-Length": "0",
+                    "Cache-Control": "private, max-age=3600, immutable",
                 },
             )
-        partial = payload[start : end + 1]
-        headers.update(
-            {
-                "Content-Range": f"bytes {start}-{end}/{total_bytes}",
-                "Content-Length": str(len(partial)),
-            }
+        except Exception as error:
+            raise HTTPException(status_code=404, detail="Audio artifact not found") from error
+
+        headers = {
+            "Content-Disposition": content_disposition(playback_name, "inline"),
+            "Accept-Ranges": "bytes",
+            "Cache-Control": "private, max-age=3600, immutable",
+            "ETag": f'"{job_id}-{artifact_slice.total_bytes}"',
+            "Content-Length": str(len(artifact_slice.content)),
+        }
+        if artifact_slice.partial:
+            headers["Content-Range"] = (
+                f"bytes {artifact_slice.start}-{artifact_slice.end}/{artifact_slice.total_bytes}"
+            )
+        return Response(
+            content=artifact_slice.content,
+            status_code=206 if artifact_slice.partial else 200,
+            media_type=media_type,
+            headers=headers,
         )
-        return Response(content=partial, status_code=206, media_type=media_type, headers=headers)
 
     frontend = _frontend_directory()
     index = frontend / "index.html"
@@ -684,6 +752,7 @@ def create_web_app(*, enforce_submission_limits: bool = True) -> FastAPI:
     memory=1024,
     timeout=15 * 60,
     max_containers=WEB_MAX_CONTAINERS,
+    volumes={ARTIFACT_MOUNT_PATH: artifact_volume.with_mount_options(read_only=True)},
 )
 @modal.concurrent(
     max_inputs=WEB_MAX_CONCURRENT_INPUTS,
