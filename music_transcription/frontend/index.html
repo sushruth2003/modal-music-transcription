@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta
       name="description"
-      content="Turn a music recording into timestamped notes and downloadable MIDI."
+      content="Turn an uploaded or linked music recording into MIDI and readable sheet music."
     />
     <title>Auto Transcribe</title>
     <link rel="stylesheet" href="/styles.css" />
@@ -25,11 +25,11 @@
 
       <main>
         <section class="intro" aria-labelledby="page-title">
-          <p class="eyebrow">Audio → note events → MIDI</p>
+          <p class="eyebrow">Recording → note events → MIDI or score</p>
           <h1 id="page-title">Hear the structure<br />inside the song.</h1>
           <p class="lede">
-            Upload a recording. Auto Transcribe turns its musical events into an instrument-aware
-            piano roll you can inspect against the original audio.
+            Upload a recording or import a public link. Auto Transcribe turns its musical events
+            into an instrument-aware piano roll, MIDI, and optional sheet music.
           </p>
         </section>
 
@@ -43,13 +43,17 @@
               </div>
             </div>
 
+            <div class="choice-tabs" role="group" aria-label="Recording source">
+              <button type="button" class="active" data-input-mode="upload">Upload file</button>
+              <button type="button" data-input-mode="url">Paste URL</button>
+            </div>
+
             <label id="drop-zone" class="drop-zone" for="audio-file">
               <input
                 id="audio-file"
                 name="audio"
                 type="file"
                 accept="audio/wav,audio/flac,audio/mpeg,audio/mp4,audio/ogg,.wav,.flac,.mp3,.m4a,.ogg"
-                required
               />
               <span class="drop-icon" aria-hidden="true">
                 <svg viewBox="0 0 24 24" role="img">
@@ -59,6 +63,21 @@
               <span class="drop-title" id="file-label">Drop audio here</span>
               <span class="drop-copy">or browse · WAV, FLAC, MP3, M4A, OGG · 100 MB max</span>
             </label>
+
+            <div id="url-source" class="url-source" hidden>
+              <label class="field" for="source-url">
+                <span>Public media URL</span>
+                <input
+                  id="source-url"
+                  name="source_url"
+                  type="url"
+                  inputmode="url"
+                  placeholder="https://youtube.com/watch?v=…"
+                  autocomplete="url"
+                />
+              </label>
+              <p>Public YouTube and Instagram posts only. Playlists, live, private, and login-only media are not supported.</p>
+            </div>
 
             <label class="field" for="instruments">
               <span>Instrument hints <small>optional</small></span>
@@ -70,6 +89,18 @@
                 autocomplete="off"
               />
             </label>
+
+            <fieldset class="output-choice">
+              <legend>Output</legend>
+              <label>
+                <input type="radio" name="output" value="midi" checked />
+                <span><strong>MIDI</strong><small>Notes + piano roll</small></span>
+              </label>
+              <label>
+                <input type="radio" name="output" value="score" />
+                <span><strong>MIDI + score</strong><small>PDF + MusicXML</small></span>
+              </label>
+            </fieldset>
 
             <button id="submit-button" class="primary-button" type="submit">
               <span>Start transcription</span>
@@ -103,9 +134,11 @@
                 <span id="progress-fill"></span>
               </div>
               <ol class="stage-list" aria-label="Transcription stages">
-                <li data-stage="submitted"><span></span>Uploaded</li>
+                <li data-stage="submitted"><span></span>Submitted</li>
+                <li data-stage="fetching"><span></span>Media imported</li>
                 <li data-stage="preprocessing"><span></span>Audio normalized</li>
                 <li data-stage="transcribing"><span></span>GPU transcription</li>
+                <li data-stage="rendering"><span></span>Score rendered</li>
                 <li data-stage="completed"><span></span>Artifacts ready</li>
               </ol>
               <p id="job-id-line" class="job-id-line"></p>
@@ -115,7 +148,7 @@
               <p class="section-kicker">Could not transcribe</p>
               <h2>Something interrupted the job.</h2>
               <p id="job-error"></p>
-              <a href="/" class="secondary-button">Try another file</a>
+                <a href="/" class="secondary-button">Try another recording</a>
             </div>
 
             <div id="result-state" class="result-state" hidden>
@@ -124,12 +157,16 @@
                   <p class="section-kicker">Transcription complete</p>
                   <h2 id="result-name">Untitled recording</h2>
                 </div>
-                <a id="midi-download" class="download-button" href="#" download>
-                  <svg viewBox="0 0 20 20" aria-hidden="true">
-                    <path d="M10 3v10m0 0 4-4m-4 4L6 9M4 16h12" />
-                  </svg>
-                  Download MIDI
-                </a>
+                <div class="result-actions">
+                  <a id="score-view" class="download-button score-action" href="#" target="_blank" hidden>View score</a>
+                  <a id="musicxml-download" class="download-button score-action" href="#" download hidden>MusicXML</a>
+                  <a id="midi-download" class="download-button" href="#" download>
+                    <svg viewBox="0 0 20 20" aria-hidden="true">
+                      <path d="M10 3v10m0 0 4-4m-4 4L6 9M4 16h12" />
+                    </svg>
+                    MIDI
+                  </a>
+                </div>
               </div>
 
               <div class="transport">
@@ -155,8 +192,11 @@
                 <audio id="source-audio" preload="metadata"></audio>
               </div>
               <p class="playback-help">
-                Original audio is your upload. Transcription preview is a synthesized playback of
+                Original audio is the submitted recording. Transcription preview is a synthesized playback of
                 the detected notes—not isolated audio from the recording.
+              </p>
+              <p id="score-help" class="score-help" hidden>
+                Sheet music is automatically quantized from model-generated MIDI. Treat it as an editable draft, not publication-ready engraving.
               </p>
 
               <div class="roll-toolbar">

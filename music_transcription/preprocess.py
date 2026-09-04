@@ -15,8 +15,10 @@ from music_transcription.config import (
     MAX_AUDIO_SECONDS,
     SUPPORTED_AUDIO_SUFFIXES,
 )
+from music_transcription.ingest import fetch_media_url
 from music_transcription.resources import app, artifact_volume, audio_image
 from music_transcription.schemas import JobSpec, PreprocessingMetrics
+from music_transcription.score import render_score
 from music_transcription.storage import job_paths, mounted_artifact_path, update_job
 
 
@@ -129,7 +131,14 @@ def process_job(spec: JobSpec) -> dict[str, object]:
     paths = job_paths(job_id, spec["source_suffix"])
 
     try:
-        update_job(job_id, "preprocessing")
+        source_url = spec.get("source_url")
+        if source_url:
+            update_job(job_id, "fetching")
+            source = fetch_media_url.remote(job_id, spec["source_suffix"], source_url)
+            update_job(job_id, "preprocessing", source_name=source["source_name"])
+        else:
+            update_job(job_id, "preprocessing")
+
         artifact_volume.reload()
         source_path = mounted_artifact_path(paths["source"])
         normalized_path = mounted_artifact_path(paths["normalized"])
@@ -151,6 +160,9 @@ def process_job(spec: JobSpec) -> dict[str, object]:
             spec["source_suffix"],
             spec["instruments"],
         )
+        if spec.get("generate_score", False):
+            update_job(job_id, "rendering", result=result)
+            result = render_score.remote(job_id, spec["source_suffix"])
         update_job(job_id, "completed", result=result)
         return result
     except Exception as error:

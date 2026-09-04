@@ -2,6 +2,8 @@ const els = {
   form: document.querySelector("#upload-form"),
   file: document.querySelector("#audio-file"),
   fileLabel: document.querySelector("#file-label"),
+  sourceUrl: document.querySelector("#source-url"),
+  urlSource: document.querySelector("#url-source"),
   instruments: document.querySelector("#instruments"),
   dropZone: document.querySelector("#drop-zone"),
   submit: document.querySelector("#submit-button"),
@@ -17,6 +19,9 @@ const els = {
   jobError: document.querySelector("#job-error"),
   resultName: document.querySelector("#result-name"),
   midiDownload: document.querySelector("#midi-download"),
+  scoreView: document.querySelector("#score-view"),
+  musicxmlDownload: document.querySelector("#musicxml-download"),
+  scoreHelp: document.querySelector("#score-help"),
   audio: document.querySelector("#source-audio"),
   play: document.querySelector("#play-button"),
   timeline: document.querySelector("#timeline"),
@@ -33,6 +38,7 @@ const els = {
 
 const state = {
   jobId: null,
+  inputMode: "upload",
   job: null,
   notes: [],
   duration: 0,
@@ -48,7 +54,20 @@ const state = {
 };
 
 const palette = ["#c8f560", "#59d4d8", "#a892ff", "#ff7968", "#efb94f", "#5ea0ff"];
-const stageOrder = ["submitted", "preprocessing", "transcribing", "completed"];
+const stageOrder = ["submitted", "fetching", "preprocessing", "transcribing", "rendering", "completed"];
+
+function wantsScore() {
+  return document.querySelector('input[name="output"]:checked')?.value === "score";
+}
+
+function setInputMode(mode) {
+  state.inputMode = mode;
+  els.dropZone.hidden = mode !== "upload";
+  els.urlSource.hidden = mode !== "url";
+  document.querySelectorAll("[data-input-mode]").forEach((button) => {
+    button.classList.toggle("active", button.dataset.inputMode === mode);
+  });
+}
 
 function showView(name) {
   for (const [key, element] of Object.entries({
@@ -109,16 +128,28 @@ function submitUpload(formData) {
 async function handleSubmit(event) {
   event.preventDefault();
   const file = els.file.files[0];
-  if (!file) return;
+  const sourceUrl = els.sourceUrl.value.trim();
+  if (state.inputMode === "upload" && !file) {
+    els.formError.textContent = "Choose an audio file first.";
+    els.formError.hidden = false;
+    return;
+  }
+  if (state.inputMode === "url" && !sourceUrl) {
+    els.formError.textContent = "Paste a public YouTube or Instagram URL first.";
+    els.formError.hidden = false;
+    return;
+  }
   els.formError.hidden = true;
   els.submit.disabled = true;
-  els.submit.querySelector("span").textContent = "Uploading…";
+  els.submit.querySelector("span").textContent = "Submitting…";
   showView("processing");
-  updateProcessing("submitted", 2, "Uploading recording");
+  updateProcessing("submitted", 2, state.inputMode === "upload" ? "Uploading recording" : "Submitting media link");
 
   const body = new FormData();
-  body.append("audio", file);
+  if (state.inputMode === "upload") body.append("audio", file);
+  else body.append("source_url", sourceUrl);
   if (els.instruments.value.trim()) body.append("instruments", els.instruments.value.trim());
+  body.append("generate_score", String(wantsScore()));
 
   try {
     const submission = await submitUpload(body);
@@ -140,17 +171,29 @@ function updateProcessing(jobState, progress, label) {
   showView("processing");
   els.processingName.textContent = label || {
     submitted: "Waiting for a worker",
+    fetching: "Importing the linked recording",
     preprocessing: "Normalizing the audio",
     transcribing: "Reading notes on the L4",
+    rendering: "Turning MIDI into sheet music",
     completed: "Artifacts ready",
   }[jobState];
   els.progressValue.textContent = `${progress}%`;
   els.progressFill.style.width = `${progress}%`;
 
-  const activeIndex = stageOrder.indexOf(jobState);
+  const sourceKind = state.job?.source_kind || state.inputMode;
+  const generateScore = state.job?.generate_score ?? wantsScore();
+  document.querySelector('[data-stage="fetching"]').hidden = sourceKind !== "url";
+  document.querySelector('[data-stage="rendering"]').hidden = !generateScore;
+  const visibleStages = stageOrder.filter((stage) => {
+    if (stage === "fetching") return sourceKind === "url";
+    if (stage === "rendering") return generateScore;
+    return true;
+  });
+  const activeIndex = visibleStages.indexOf(jobState);
   document.querySelectorAll(".stage-list li").forEach((item, index) => {
-    item.classList.toggle("complete", index < activeIndex || jobState === "completed");
-    item.classList.toggle("active", index === activeIndex && jobState !== "completed");
+    const visibleIndex = visibleStages.indexOf(item.dataset.stage);
+    item.classList.toggle("complete", visibleIndex >= 0 && (visibleIndex < activeIndex || jobState === "completed"));
+    item.classList.toggle("active", visibleIndex === activeIndex && jobState !== "completed");
   });
 }
 
@@ -194,6 +237,14 @@ async function loadResult(job) {
   els.resultName.textContent = job.source_name;
   els.audio.src = job.links.audio;
   els.midiDownload.href = job.links.midi;
+  const hasScore = Boolean(job.links.score_pdf && job.links.musicxml);
+  els.scoreView.hidden = !hasScore;
+  els.musicxmlDownload.hidden = !hasScore;
+  els.scoreHelp.hidden = !hasScore;
+  if (hasScore) {
+    els.scoreView.href = job.links.score_pdf;
+    els.musicxmlDownload.href = job.links.musicxml;
+  }
   els.totalTime.textContent = formatTime(state.duration);
   els.metricNotes.textContent = job.result?.note_count ?? state.notes.length;
   els.metricDuration.textContent = formatTime(state.duration);
@@ -401,7 +452,14 @@ function initialize() {
 }
 
 els.form.addEventListener("submit", handleSubmit);
-els.file.addEventListener("change", () => setSelectedFile(els.file.files[0]));
+document.querySelectorAll("[data-input-mode]").forEach((button) => {
+  button.addEventListener("click", () => setInputMode(button.dataset.inputMode));
+});
+els.file.addEventListener("change", () => {
+  setInputMode("upload");
+  setSelectedFile(els.file.files[0]);
+});
+els.sourceUrl.addEventListener("input", () => setInputMode("url"));
 for (const eventName of ["dragenter", "dragover"]) {
   els.dropZone.addEventListener(eventName, (event) => {
     event.preventDefault();
@@ -420,6 +478,7 @@ els.dropZone.addEventListener("drop", (event) => {
   const transfer = new DataTransfer();
   transfer.items.add(file);
   els.file.files = transfer.files;
+  setInputMode("upload");
   setSelectedFile(file);
 });
 els.play.addEventListener("click", togglePlayback);

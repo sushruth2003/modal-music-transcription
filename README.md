@@ -1,6 +1,6 @@
 # Auto Transcribe
 
-Transcribe music into timestamped, instrument-aware notes and MIDI with MuScriptor Large on Modal.
+Transcribe uploaded or linked music into timestamped notes, MIDI, and optional sheet music with MuScriptor Large on Modal.
 
 ## Quickstart
 
@@ -32,17 +32,33 @@ uv run modal deploy -m music_transcription.pipeline
 ```
 
 Modal prints the web URL after deployment. Open it to upload a WAV, FLAC, MP3,
-M4A, or OGG file (up to 100 MB), watch the durable job progress, compare the
-original audio with a browser-synthesized note preview, inspect the synchronized
-piano roll, and download MIDI. The public demo accepts at most three submissions
-per IP address per rolling hour and ten submissions globally per UTC day. Audio
-longer than ten minutes is rejected before GPU inference.
+M4A, or OGG file (up to 100 MB), or paste a public YouTube or Instagram URL.
+Choose MIDI alone or MIDI plus a printable PDF and editable MusicXML score. The
+page also provides original-audio playback, a synthesized note preview, and a
+synchronized piano roll.
+
+URL import is deliberately limited to public, single-item YouTube and Instagram
+pages. It does not accept playlists, live streams, private/login-only media, or
+cookies. Use it only for media you own or have permission to process. Site
+extractors can occasionally break when those services change. Every input is
+limited to ten minutes and 100 MB before GPU inference. The public demo accepts
+at most three submissions per IP address per rolling hour and ten submissions
+globally per UTC day.
+
+The PDF is an automatically quantized draft derived from model-generated MIDI,
+not publication-ready engraving. MusicXML is included so the result can be
+corrected in MuseScore or another notation editor.
 
 The CLI remains useful for automation and batches:
 
 ```bash
 uv run python -m music_transcription.client submit \
   --audio data/synthetic-chords-30s.wav \
+  --score \
+  --wait
+
+uv run python -m music_transcription.client submit \
+  --url 'https://youtu.be/your-public-video-id' \
   --wait
 
 uv run python -m music_transcription.client submit-batch \
@@ -58,14 +74,18 @@ uv run python -m music_transcription.client download --job-id <job_id>
 ```text
 browser / CLI
      │
-     │ POST audio                         GET status / audio / events / MIDI
+     │ POST upload or URL                 GET status / audio / MIDI / score
      ▼                                                   ▲
 ┌────────────────────────────────────────────────────────────────────────┐
 │ CPU-only FastAPI ASGI Function                                         │
-│ reserve quota → stream upload → direct Volume API → process_job.spawn()│
+│ validate choice → reserve quota → stage request → process_job.spawn()  │
 │ returns 202 + job_id immediately                                       │
 └──────────────────────────────┬─────────────────────────────────────────┘
                                │ small JobSpec
+                               ▼
+               URL only: CPU yt-dlp + ffmpeg Function
+               restricted public page → source FLAC
+                               │
                                ▼
                     CPU process_job Function
                     ffmpeg → mono 16 kHz WAV
@@ -75,10 +95,14 @@ browser / CLI
                     pinned 1.4B model loaded once per warm container
                                │ commit
                                ▼
-              artifact Volume: source + events + MIDI + metrics
+              Score only: CPU MuseScore Function
+              MIDI → printable PDF + editable MusicXML
                                │
-              job Dict: submitted → preprocessing → transcribing
-                                      → completed / failed
+                               ▼
+     artifact Volume: source + events + MIDI + optional score + metrics
+                               │
+     job Dict: submitted → [fetching] → preprocessing → transcribing
+                                      → [rendering] → completed / failed
 ```
 
 The web function is an I/O layer, not an inference server. `@modal.asgi_app`
@@ -92,11 +116,14 @@ container handles up to 25 concurrent requests, keeping the quota update
 serialized while status and artifact reads remain concurrent.
 
 `process_job.spawn()` makes submission asynchronous: the HTTP request can end
-while a CPU worker normalizes the recording and an L4 worker transcribes it. Those
-workers exchange Volume paths rather than audio bytes. The model checkpoint lives
-on a separate read-only Volume and is loaded by `@modal.enter` once for each warm
-GPU container. GPU inference still has `min_containers=0` and `max_containers=4`,
-so it scales to zero and has a bounded spend rate.
+while CPU workers import and normalize the recording, an L4 worker transcribes it,
+and an optional CPU worker renders notation. Those workers exchange Volume paths
+rather than audio bytes. The URL worker runs pinned yt-dlp, ffmpeg, and Deno in its
+own image; the notation worker runs MuseScore in another image. Neither workload
+occupies an L4. The model checkpoint lives on a separate read-only Volume and is
+loaded by `@modal.enter` once for each warm GPU container. GPU inference still has
+`min_containers=0` and `max_containers=4`, so it scales to zero and has a bounded
+spend rate.
 
 The durable artifacts for each job are:
 
@@ -108,6 +135,8 @@ jobs/{job_id}/
 ├── preprocessing.json
 ├── events.jsonl
 ├── transcription.mid
+├── score.pdf            # when requested
+├── score.musicxml       # when requested
 └── metrics.json
 ```
 
@@ -115,7 +144,9 @@ jobs/{job_id}/
 |---|---|
 | FastAPI ASGI Function | Accept uploads, return job handles, and serve status/artifacts |
 | CPU `process_job` Function | Normalize one recording and coordinate its GPU call |
+| CPU URL-import Function | Validate and extract one public YouTube/Instagram item to FLAC |
 | L4 GPU class | Keep MuScriptor resident while warm and run inference |
+| CPU score Function | Import MIDI into MuseScore and export PDF plus MusicXML |
 | Model Volume | Persist the static, pinned checkpoint independently of containers |
 | Artifact Volume | Persist source audio and generated files across every stage |
 | Dict | Hold small status records, timestamps, errors, and result summaries |

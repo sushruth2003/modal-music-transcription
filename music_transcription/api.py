@@ -32,14 +32,17 @@ from music_transcription.config import (
     WEB_TARGET_CONCURRENT_INPUTS,
     WEB_UPLOAD_CHUNK_BYTES,
 )
+from music_transcription.ingest import validate_media_url
 from music_transcription.preprocess import process_job
 from music_transcription.resources import app, artifact_volume, rate_limit_states, web_image
 from music_transcription.schemas import JobRecord, JobSpec, SerializedEvent
 from music_transcription.storage import (
     get_job,
     new_job_spec,
+    new_url_job_spec,
     parse_instruments,
     stage_job_sources,
+    stage_url_job,
     update_job,
 )
 
@@ -47,8 +50,10 @@ LOCAL_FRONTEND_PATH = Path(__file__).parent / "frontend"
 TERMINAL_STATES = frozenset({"completed", "failed"})
 STATE_PROGRESS = {
     "submitted": 10,
+    "fetching": 20,
     "preprocessing": 30,
     "transcribing": 65,
+    "rendering": 88,
     "completed": 100,
     "failed": 100,
 }
@@ -161,10 +166,11 @@ def stage_uploaded_file(
     source: BinaryIO,
     source_name: str,
     instruments: list[str] | None,
+    generate_score: bool = False,
 ) -> tuple[JobSpec, int]:
     """Spool one request to ephemeral disk, then commit it to the artifact Volume."""
 
-    spec = new_job_spec(source_name, instruments)
+    spec = new_job_spec(source_name, instruments, generate_score=generate_score)
     with tempfile.TemporaryDirectory(prefix="music-transcription-upload-") as directory:
         local_source = Path(directory) / f"source{spec['source_suffix']}"
         source_bytes = copy_limited(source, local_source, WEB_MAX_UPLOAD_BYTES)
@@ -265,6 +271,8 @@ def public_job_record(record: JobRecord) -> dict[str, object]:
         "progress": STATE_PROGRESS[record["state"]],
         "source_name": record["source_name"],
         "instruments": record["instruments"],
+        "source_kind": record.get("source_kind", "upload"),
+        "generate_score": record.get("generate_score", False),
         "created_at": record["created_at"],
         "updated_at": record["updated_at"],
         "links": {
@@ -275,6 +283,11 @@ def public_job_record(record: JobRecord) -> dict[str, object]:
             "midi": f"/transcriptions/{job_id}/midi",
         },
     }
+    if record.get("generate_score"):
+        links = response["links"]
+        assert isinstance(links, dict)
+        links["score_pdf"] = f"/transcriptions/{job_id}/score.pdf"
+        links["musicxml"] = f"/transcriptions/{job_id}/musicxml"
     if result:
         response["result"] = result
     if "error" in record:
@@ -298,7 +311,7 @@ def create_web_app(*, enforce_submission_limits: bool = True) -> FastAPI:
     web_app = FastAPI(
         title="Auto Transcribe API",
         description="Asynchronous audio-to-MIDI transcription",
-        version="0.2.0",
+        version="0.3.0",
     )
     submission_lock = asyncio.Lock()
 
@@ -378,34 +391,55 @@ def create_web_app(*, enforce_submission_limits: bool = True) -> FastAPI:
     @web_app.post("/transcriptions", status_code=status.HTTP_202_ACCEPTED)
     async def submit_transcription(
         request: Request,
-        audio: Annotated[UploadFile, File()],
+        audio: Annotated[UploadFile | None, File()] = None,
+        source_url: Annotated[str | None, Form()] = None,
         instruments: Annotated[str | None, Form()] = None,
+        generate_score: Annotated[bool, Form()] = False,
     ) -> JSONResponse:
-        content_length = request.headers.get("content-length")
-        if (
-            content_length
-            and content_length.isdigit()
-            and int(content_length) > WEB_MAX_UPLOAD_BYTES + WEB_UPLOAD_CHUNK_BYTES
-        ):
-            raise HTTPException(status_code=413, detail="Audio upload is too large")
-        if not audio.filename:
-            raise HTTPException(status_code=400, detail="The upload needs a filename")
+        normalized_url = source_url.strip() if source_url else None
+        if (audio is None) == (normalized_url is None):
+            raise HTTPException(
+                status_code=400,
+                detail="Provide exactly one source: an upload or a public media URL",
+            )
 
         try:
             hints = validate_instruments(instruments)
-            await audio.seek(0)
-            spec, source_bytes = await asyncio.to_thread(
-                stage_uploaded_file,
-                audio.file,
-                audio.filename,
-                hints,
-            )
+            if audio is not None:
+                content_length = request.headers.get("content-length")
+                if (
+                    content_length
+                    and content_length.isdigit()
+                    and int(content_length) > WEB_MAX_UPLOAD_BYTES + WEB_UPLOAD_CHUNK_BYTES
+                ):
+                    raise UploadTooLargeError("Audio upload is too large")
+                if not audio.filename:
+                    raise ValueError("The upload needs a filename")
+                await audio.seek(0)
+                spec, source_bytes = await asyncio.to_thread(
+                    stage_uploaded_file,
+                    audio.file,
+                    audio.filename,
+                    hints,
+                    generate_score,
+                )
+            else:
+                assert normalized_url is not None
+                safe_url = validate_media_url(normalized_url)
+                spec = new_url_job_spec(
+                    safe_url,
+                    hints,
+                    generate_score=generate_score,
+                )
+                await asyncio.to_thread(stage_url_job, spec)
+                source_bytes = None
         except UploadTooLargeError as error:
             raise HTTPException(status_code=413, detail=str(error)) from error
         except ValueError as error:
             raise HTTPException(status_code=400, detail=str(error)) from error
         finally:
-            await audio.close()
+            if audio is not None:
+                await audio.close()
 
         try:
             call_id = await asyncio.to_thread(spawn_process_job, spec)
@@ -421,16 +455,20 @@ def create_web_app(*, enforce_submission_limits: bool = True) -> FastAPI:
             ) from error
 
         job_id = spec["job_id"]
+        content: dict[str, object] = {
+            "job_id": job_id,
+            "state": "submitted",
+            "source_kind": "url" if normalized_url else "upload",
+            "generate_score": generate_score,
+            "function_call_id": call_id,
+            "status_url": f"/transcriptions/{job_id}",
+            "result_url": f"/jobs/{job_id}",
+        }
+        if source_bytes is not None:
+            content["source_bytes"] = source_bytes
         return JSONResponse(
             status_code=status.HTTP_202_ACCEPTED,
-            content={
-                "job_id": job_id,
-                "state": "submitted",
-                "source_bytes": source_bytes,
-                "function_call_id": call_id,
-                "status_url": f"/transcriptions/{job_id}",
-                "result_url": f"/jobs/{job_id}",
-            },
+            content=content,
             headers={"Location": f"/transcriptions/{job_id}", "Retry-After": "2"},
         )
 
@@ -483,6 +521,39 @@ def create_web_app(*, enforce_submission_limits: bool = True) -> FastAPI:
             headers={
                 "Content-Disposition": content_disposition(
                     f"{Path(record['source_name']).stem}.mid"
+                )
+            },
+        )
+
+    @web_app.get("/transcriptions/{job_id}/score.pdf")
+    async def transcription_score_pdf(job_id: str) -> Response:
+        record = await completed_job(job_id)
+        if not record.get("generate_score"):
+            raise HTTPException(status_code=404, detail="This job did not request a score")
+        payload = await artifact(record, "score_pdf")
+        return Response(
+            content=payload,
+            media_type="application/pdf",
+            headers={
+                "Content-Disposition": content_disposition(
+                    f"{Path(record['source_name']).stem}-score.pdf",
+                    "inline",
+                )
+            },
+        )
+
+    @web_app.get("/transcriptions/{job_id}/musicxml")
+    async def transcription_musicxml(job_id: str) -> Response:
+        record = await completed_job(job_id)
+        if not record.get("generate_score"):
+            raise HTTPException(status_code=404, detail="This job did not request a score")
+        payload = await artifact(record, "musicxml")
+        return Response(
+            content=payload,
+            media_type="application/vnd.recordare.musicxml+xml",
+            headers={
+                "Content-Disposition": content_disposition(
+                    f"{Path(record['source_name']).stem}-score.musicxml"
                 )
             },
         )

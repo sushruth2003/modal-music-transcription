@@ -9,7 +9,11 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
-from music_transcription.config import ARTIFACT_MOUNT_PATH, SUPPORTED_AUDIO_SUFFIXES
+from music_transcription.config import (
+    ARTIFACT_MOUNT_PATH,
+    SUPPORTED_AUDIO_SUFFIXES,
+    URL_SOURCE_SUFFIX,
+)
 from music_transcription.resources import artifact_volume, job_states
 from music_transcription.schemas import JobPaths, JobRecord, JobSpec, JobState
 
@@ -18,7 +22,12 @@ def utc_now() -> str:
     return datetime.now(UTC).isoformat()
 
 
-def new_job_spec(source_name: str, instruments: list[str] | None) -> JobSpec:
+def new_job_spec(
+    source_name: str,
+    instruments: list[str] | None,
+    *,
+    generate_score: bool = False,
+) -> JobSpec:
     """Create the small value sent to a remote M1 Function."""
 
     suffix = Path(source_name).suffix.lower()
@@ -29,6 +38,25 @@ def new_job_spec(source_name: str, instruments: list[str] | None) -> JobSpec:
         "source_name": Path(source_name).name,
         "source_suffix": suffix,
         "instruments": instruments,
+        "generate_score": generate_score,
+    }
+
+
+def new_url_job_spec(
+    source_url: str,
+    instruments: list[str] | None,
+    *,
+    generate_score: bool = False,
+) -> JobSpec:
+    """Create a job whose first worker will materialize remote media as FLAC."""
+
+    return {
+        "job_id": uuid4().hex,
+        "source_name": "remote-media.flac",
+        "source_suffix": URL_SOURCE_SUFFIX,
+        "source_url": source_url,
+        "instruments": instruments,
+        "generate_score": generate_score,
     }
 
 
@@ -62,6 +90,8 @@ def job_paths(job_id: str, source_suffix: str) -> JobPaths:
         "preprocessing": f"{prefix}/preprocessing.json",
         "events": f"{prefix}/events.jsonl",
         "midi": f"{prefix}/transcription.mid",
+        "score_pdf": f"{prefix}/score.pdf",
+        "musicxml": f"{prefix}/score.musicxml",
         "metrics": f"{prefix}/metrics.json",
     }
 
@@ -82,6 +112,8 @@ def initial_job_record(spec: JobSpec) -> JobRecord:
         "state": "submitted",
         "source_name": spec["source_name"],
         "instruments": spec["instruments"],
+        "source_kind": "url" if spec.get("source_url") else "upload",
+        "generate_score": bool(spec.get("generate_score", False)),
         "paths": job_paths(spec["job_id"], spec["source_suffix"]),
         "created_at": now,
         "updated_at": now,
@@ -103,6 +135,18 @@ def stage_job_sources(sources: list[Path], specs: list[JobSpec]) -> None:
 
     for spec in specs:
         job_states[spec["job_id"]] = initial_job_record(spec)
+
+
+def stage_url_job(spec: JobSpec) -> None:
+    """Commit immutable URL request metadata, then publish its initial state."""
+
+    if not spec.get("source_url"):
+        raise ValueError("A URL job requires source_url")
+    paths = job_paths(spec["job_id"], spec["source_suffix"])
+    request = json.dumps(spec, indent=2, sort_keys=True).encode() + b"\n"
+    with artifact_volume.batch_upload() as batch:
+        batch.put_file(io.BytesIO(request), f"/{paths['request']}")
+    job_states[spec["job_id"]] = initial_job_record(spec)
 
 
 def get_job(job_id: str) -> JobRecord:

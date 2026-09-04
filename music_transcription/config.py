@@ -31,6 +31,22 @@ AUDIO_SAMPLE_RATE = 16_000
 MAX_AUDIO_SECONDS = 10 * 60
 MAX_M1_BATCH_FILES = 4
 SUPPORTED_AUDIO_SUFFIXES = frozenset({".flac", ".m4a", ".mp3", ".ogg", ".wav"})
+URL_SOURCE_SUFFIX = ".flac"
+SUPPORTED_MEDIA_HOSTS = frozenset(
+    {
+        "instagram.com",
+        "www.instagram.com",
+        "m.instagram.com",
+        "youtube.com",
+        "www.youtube.com",
+        "m.youtube.com",
+        "music.youtube.com",
+        "youtu.be",
+    }
+)
+URL_DOWNLOAD_PACKAGE = "yt-dlp[default]==2026.8.19"
+DENO_VERSION = "2.9.6"
+URL_DOWNLOAD_TIMEOUT_SECONDS = 10 * 60
 
 FASTAPI_PACKAGE = "fastapi==0.141.1"
 MULTIPART_PACKAGE = "python-multipart==0.0.32"
@@ -44,6 +60,7 @@ MAX_INSTRUMENT_HINTS = 16
 WEB_SUBMISSIONS_PER_IP_HOUR = 3
 WEB_SUBMISSIONS_GLOBAL_DAY = 10
 WEB_RATE_LIMIT_WINDOW_SECONDS = 60 * 60
+SCORE_RENDER_TIMEOUT_SECONDS = 5 * 60
 
 # Modal's published L4 rate when this milestone was implemented. This is only
 # used for a clearly labelled inference-time estimate, not as a billing record.

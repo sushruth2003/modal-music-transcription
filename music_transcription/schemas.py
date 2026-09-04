@@ -23,7 +23,15 @@ class SerializedEvent(TypedDict):
     total: NotRequired[int]
 
 
-JobState = Literal["submitted", "preprocessing", "transcribing", "completed", "failed"]
+JobState = Literal[
+    "submitted",
+    "fetching",
+    "preprocessing",
+    "transcribing",
+    "rendering",
+    "completed",
+    "failed",
+]
 
 
 class JobPaths(TypedDict):
@@ -33,6 +41,8 @@ class JobPaths(TypedDict):
     preprocessing: str
     events: str
     midi: str
+    score_pdf: str
+    musicxml: str
     metrics: str
 
 
@@ -41,6 +51,8 @@ class JobSpec(TypedDict):
     source_name: str
     source_suffix: str
     instruments: list[str] | None
+    source_url: NotRequired[str]
+    generate_score: NotRequired[bool]
 
 
 class JobRecord(TypedDict):
@@ -48,6 +60,8 @@ class JobRecord(TypedDict):
     state: JobState
     source_name: str
     instruments: list[str] | None
+    source_kind: Literal["upload", "url"]
+    generate_score: bool
     paths: JobPaths
     created_at: str
     updated_at: str

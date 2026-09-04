@@ -17,10 +17,31 @@ def test_new_job_spec_and_paths(monkeypatch) -> None:
         "source_name": "demo.MP3",
         "source_suffix": ".mp3",
         "instruments": ["piano"],
+        "generate_score": False,
     }
     assert storage.job_paths(spec["job_id"], spec["source_suffix"])["source"] == (
         f"jobs/{'a' * 32}/source.mp3"
     )
+    assert storage.job_paths(spec["job_id"], spec["source_suffix"])["score_pdf"].endswith(
+        "/score.pdf"
+    )
+
+
+def test_url_job_spec_uses_stable_flac_source(monkeypatch) -> None:
+    class FixedUuid:
+        hex = "c" * 32
+
+    monkeypatch.setattr(storage, "uuid4", lambda: FixedUuid())
+    spec = storage.new_url_job_spec(
+        "https://youtu.be/example",
+        None,
+        generate_score=True,
+    )
+    record = storage.initial_job_record(spec)
+
+    assert spec["source_suffix"] == ".flac"
+    assert record["source_kind"] == "url"
+    assert record["generate_score"] is True
 
 
 @pytest.mark.parametrize("job_id", ["short", "A" * 32, "../" + "a" * 29])
