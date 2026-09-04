@@ -1,4 +1,4 @@
-# MuScriptor on Modal
+# Auto Transcribe
 
 Transcribe music into timestamped, instrument-aware notes and MIDI with MuScriptor Large on Modal.
 
@@ -122,6 +122,8 @@ jobs/{job_id}/
 | Rate-limit Dict | Enforce rolling per-IP and global daily submission quotas |
 | `spawn` / `spawn_map` | Start one durable job or fan out a CLI batch without waiting |
 
-The browser turns paired note-start/note-end events into the piano roll. “Source”
-plays the uploaded recording; “Notes” schedules a lightweight Web Audio preview,
-so M2 does not need another server-side synthesis worker.
+The browser turns paired note-start/note-end events into the piano roll. “Original
+audio” plays the uploaded recording; “Transcription preview” schedules a lightweight
+Web Audio rendition of the detected notes, so M2 does not need another server-side
+synthesis worker. MuScriptor Large is the underlying transcription model, not the
+name of the application.

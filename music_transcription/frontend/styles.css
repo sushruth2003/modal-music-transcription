@@ -620,6 +620,13 @@ h2 {
   background: #2d312b;
 }
 
+.playback-help {
+  margin: 8px 0 18px 60px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
 .roll-toolbar {
   min-height: 40px;
   padding: 8px 0;
@@ -787,6 +794,7 @@ footer a {
   .job-card { padding: 24px 18px; }
   .transport { flex-wrap: wrap; }
   .source-switch { order: 3; margin-left: 60px; }
+  .playback-help { margin-left: 0; }
   .roll-toolbar { align-items: flex-start; }
   .roll-legend { display: none; }
   .piano-roll { height: 220px; }

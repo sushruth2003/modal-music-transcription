@@ -136,7 +136,9 @@ def test_job_page_and_health_are_served() -> None:
     assert client.get("/api/health").json() == {"status": "ok"}
     page = client.get(f"/jobs/{JOB_ID}")
     assert page.status_code == 200
-    assert "MuScriptor Studio" in page.text
+    assert "Auto Transcribe" in page.text
+    assert "Original audio" in page.text
+    assert "Transcription preview" in page.text
 
 
 def test_rate_limit_allows_three_hourly_submissions_then_rejects() -> None:

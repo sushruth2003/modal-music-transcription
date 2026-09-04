@@ -5,20 +5,20 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta
       name="description"
-      content="Turn a music recording into timestamped notes and MIDI with MuScriptor on Modal."
+      content="Turn a music recording into timestamped notes and downloadable MIDI."
     />
-    <title>MuScriptor Studio</title>
+    <title>Auto Transcribe</title>
     <link rel="stylesheet" href="/styles.css" />
     <script src="/app.js" defer></script>
   </head>
   <body>
     <div class="shell">
       <header class="topbar">
-        <a class="brand" href="/" aria-label="MuScriptor Studio home">
+        <a class="brand" href="/" aria-label="Auto Transcribe home">
           <span class="brand-mark" aria-hidden="true">
             <i></i><i></i><i></i><i></i><i></i>
           </span>
-          <span>MuScriptor <strong>Studio</strong></span>
+          <span>Auto <strong>Transcribe</strong></span>
         </a>
         <span class="runtime"><span></span> Modal · L4</span>
       </header>
@@ -28,7 +28,7 @@
           <p class="eyebrow">Audio → note events → MIDI</p>
           <h1 id="page-title">Hear the structure<br />inside the song.</h1>
           <p class="lede">
-            Upload a recording. MuScriptor separates its musical events into an instrument-aware
+            Upload a recording. Auto Transcribe turns its musical events into an instrument-aware
             piano roll you can inspect against the original audio.
           </p>
         </section>
@@ -148,12 +148,16 @@
                   </div>
                   <input id="timeline" type="range" min="0" max="1000" value="0" aria-label="Playback position" />
                 </div>
-                <div class="source-switch" role="group" aria-label="Playback source">
-                  <button type="button" class="active" data-mode="source">Source</button>
-                  <button type="button" data-mode="synth">Notes</button>
+                <div class="source-switch" role="group" aria-label="Choose playback version">
+                  <button type="button" class="active" data-mode="source">Original audio</button>
+                  <button type="button" data-mode="synth">Transcription preview</button>
                 </div>
                 <audio id="source-audio" preload="metadata"></audio>
               </div>
+              <p class="playback-help">
+                Original audio is your upload. Transcription preview is a synthesized playback of
+                the detected notes—not isolated audio from the recording.
+              </p>
 
               <div class="roll-toolbar">
                 <div id="instrument-filters" class="instrument-filters" aria-label="Instrument filters"></div>
@@ -182,7 +186,7 @@
       </main>
 
       <footer>
-        <span>MuScriptor Large · 1.4B parameters</span>
+        <span>Transcription model: MuScriptor Large · Runs on Modal</span>
         <a href="/docs">API docs</a>
       </footer>
     </div>

@@ -296,7 +296,7 @@ def create_web_app() -> FastAPI:
     """Construct the ASGI app. Kept separate so HTTP behavior is unit-testable."""
 
     web_app = FastAPI(
-        title="MuScriptor on Modal",
+        title="Auto Transcribe API",
         description="Asynchronous audio-to-MIDI transcription",
         version="0.2.0",
     )
