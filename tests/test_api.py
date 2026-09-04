@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import re
 
 import pytest
 from fastapi.testclient import TestClient
@@ -241,7 +242,13 @@ def test_job_page_and_health_are_served() -> None:
         "drums",
     }
     assert {option["label"] for option in options} >= {"Soprano & Alto Sax"}
-    assert client.get("/app.js").headers["cache-control"] == "no-cache"
+    script_response = client.get("/app.js")
+    assert script_response.headers["cache-control"] == "no-cache"
+    declared_elements = set(
+        re.findall(r"^\s+(\w+): document\.querySelector", script_response.text, re.MULTILINE)
+    )
+    referenced_elements = set(re.findall(r"\bels\.(\w+)\b", script_response.text))
+    assert referenced_elements <= declared_elements
     page = client.get(f"/jobs/{JOB_ID}")
     assert page.status_code == 200
     assert "Auto Transcribe" in page.text
@@ -251,7 +258,7 @@ def test_job_page_and_health_are_served() -> None:
     assert "Paste URL" not in page.text
     assert "Auto-detect instruments" in page.text
     assert "MIDI + score" in page.text
-    assert "/app.js?v=20260904-4" in page.text
+    assert "/app.js?v=20260904-5" in page.text
     assert "/styles.css?v=20260904-2" in page.text
 
 

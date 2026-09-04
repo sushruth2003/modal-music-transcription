@@ -478,7 +478,6 @@ els.form.addEventListener("submit", handleSubmit);
 els.file.addEventListener("change", () => {
   setSelectedFile(els.file.files[0]);
 });
-els.sourceUrl.addEventListener("input", () => setInputMode("url"));
 for (const eventName of ["dragenter", "dragover"]) {
   els.dropZone.addEventListener(eventName, (event) => {
     event.preventDefault();
