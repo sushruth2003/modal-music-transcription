@@ -8,8 +8,8 @@
       content="Turn an uploaded audio or video recording into MIDI and readable sheet music."
     />
     <title>Auto Transcribe</title>
-    <link rel="stylesheet" href="/styles.css?v=20260904-2" />
-    <script src="/app.js?v=20260904-5" defer></script>
+    <link rel="stylesheet" href="/styles.css?v=20260904-3" />
+    <script src="/app.js?v=20260904-6" defer></script>
   </head>
   <body>
     <div class="shell">
@@ -20,7 +20,10 @@
           </span>
           <span>Auto <strong>Transcribe</strong></span>
         </a>
-        <span class="runtime"><span></span> Modal · L4</span>
+        <nav class="topbar-links" aria-label="Main navigation">
+          <a href="/how-it-works">How it works</a>
+          <span class="runtime"><span></span> Modal · L4</span>
+        </nav>
       </header>
 
       <main>
@@ -83,7 +86,7 @@
               </label>
               <label>
                 <input type="radio" name="output" value="score" />
-                <span><strong>MIDI + score</strong><small>PDF + MusicXML</small></span>
+                <span><strong>MIDI + score</strong><small>Printable PDF draft</small></span>
               </label>
             </fieldset>
 
@@ -93,6 +96,9 @@
                 <path d="M4 10h12m-5-5 5 5-5 5" />
               </svg>
             </button>
+            <p class="beta-note">
+              Small public beta · 2 jobs per network each hour · shared $10 monthly compute pool
+            </p>
             <p id="form-error" class="form-error" role="alert" hidden></p>
           </form>
 
@@ -143,7 +149,6 @@
                 </div>
                 <div class="result-actions">
                   <a id="score-view" class="download-button score-action" href="#" target="_blank" hidden>View score</a>
-                  <a id="musicxml-download" class="download-button score-action" href="#" download hidden>MusicXML</a>
                   <a id="midi-download" class="download-button" href="#" download>
                     <svg viewBox="0 0 20 20" aria-hidden="true">
                       <path d="M10 3v10m0 0 4-4m-4 4L6 9M4 16h12" />
@@ -211,7 +216,7 @@
 
       <footer>
         <span>Transcription model: MuScriptor Large · Runs on Modal</span>
-        <a href="/docs">API docs</a>
+        <span class="footer-links"><a href="/how-it-works">How it works</a><a href="/docs">API docs</a></span>
       </footer>
     </div>
   </body>

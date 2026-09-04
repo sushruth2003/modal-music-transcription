@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      name="description"
+      content="How Auto Transcribe turns recordings into a piano roll, MIDI, and a PDF score."
+    />
+    <title>How it works · Auto Transcribe</title>
+    <link rel="stylesheet" href="/styles.css?v=20260904-3" />
+  </head>
+  <body>
+    <div class="shell">
+      <header class="topbar">
+        <a class="brand" href="/" aria-label="Auto Transcribe home">
+          <span class="brand-mark" aria-hidden="true">
+            <i></i><i></i><i></i><i></i><i></i>
+          </span>
+          <span>Auto <strong>Transcribe</strong></span>
+        </a>
+        <nav class="topbar-links" aria-label="Main navigation">
+          <a class="active" href="/how-it-works" aria-current="page">How it works</a>
+          <span class="runtime"><span></span> Modal · L4</span>
+        </nav>
+      </header>
+
+      <main class="how-page">
+        <section class="how-hero">
+          <p class="eyebrow">Inside the pipeline</p>
+          <h1>A recording becomes<br />a musical timeline.</h1>
+          <p class="lede">
+            Auto Transcribe combines beat tracking and a specialized music model. It does not
+            search for an existing score: it listens to your recording and predicts each note.
+          </p>
+        </section>
+
+        <section class="how-grid" aria-label="Transcription steps">
+          <article>
+            <span>01</span>
+            <p class="section-kicker">Prepare</p>
+            <h2>Normalize the recording</h2>
+            <p>Audio is extracted from video when needed, converted to mono, and resampled to 16 kHz so every job reaches the models in the same format.</p>
+          </article>
+          <article>
+            <span>02</span>
+            <p class="section-kicker">Find time</p>
+            <h2>Detect beats and meter</h2>
+            <p>Beat This estimates the beat grid, downbeats, tempo, and likely meter. This gives the transcription a musical clock instead of raw seconds alone.</p>
+          </article>
+          <article>
+            <span>03</span>
+            <p class="section-kicker">Listen</p>
+            <h2>Decode notes on a GPU</h2>
+            <p>MuScriptor Large runs on an NVIDIA L4 and predicts note starts, note ends, pitch, and instrument. Optional instrument hints narrow its choices.</p>
+          </article>
+          <article>
+            <span>04</span>
+            <p class="section-kicker">Correct time</p>
+            <h2>Align notes to the beat grid</h2>
+            <p>A conservative timing pass tests whether the beat grid is trustworthy, then nudges nearby onsets and note lengths onto sensible subdivisions without flattening expressive timing.</p>
+          </article>
+          <article>
+            <span>05</span>
+            <p class="section-kicker">Deliver</p>
+            <h2>Build playable artifacts</h2>
+            <p>The corrected events become a piano roll and MIDI file. If requested, MuseScore turns that MIDI into a printable PDF draft.</p>
+          </article>
+        </section>
+
+        <section class="pipeline-strip" aria-label="Processing architecture">
+          <span>Upload</span><i>→</i><span>16 kHz audio</span><i>→</i><span>Beat grid</span><i>→</i><span>GPU notes</span><i>→</i><span>MIDI + PDF</span>
+        </section>
+
+        <section class="how-notes">
+          <div>
+            <p class="section-kicker">What to expect</p>
+            <h2>A useful first draft, not a perfect score.</h2>
+          </div>
+          <div class="how-note-copy">
+            <p>Clean recordings with distinct instruments work best. Dense mixes, room noise, heavy effects, very fast passages, and overlapping instruments can produce missed or extra notes.</p>
+            <p>The PDF is automatically quantized from predicted MIDI. Use the MIDI in a DAW or notation editor when you want to refine voicing, rhythm, key signatures, or engraving.</p>
+          </div>
+        </section>
+
+        <section class="beta-card">
+          <div>
+            <p class="section-kicker">Small public beta</p>
+            <h2>Built to be shareable and inexpensive.</h2>
+            <p>Jobs are durable, so the result URL still works after you close the tab. Compute scales down when idle, runs one GPU job at a time, and is protected by hourly, daily, and shared monthly limits.</p>
+          </div>
+          <a class="primary-button" href="/">Transcribe a recording</a>
+        </section>
+      </main>
+
+      <footer>
+        <span>Transcription model: MuScriptor Large · Runs on Modal</span>
+        <span class="footer-links"><a href="/">Transcribe</a><a href="/docs">API docs</a></span>
+      </footer>
+    </div>
+  </body>
+</html>

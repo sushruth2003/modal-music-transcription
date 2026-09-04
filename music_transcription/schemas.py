@@ -54,7 +54,6 @@ class JobPaths(TypedDict):
     events: str
     midi: str
     score_pdf: str
-    musicxml: str
     metrics: str
 
 

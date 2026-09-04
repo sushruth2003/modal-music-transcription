@@ -23,6 +23,8 @@ from music_transcription.config import (
     FRONTEND_MOUNT_PATH,
     L4_PRICE_PER_SECOND_USD,
     MUSCRIPTOR_INSTRUMENT_GROUPS,
+    PUBLIC_BETA_JOB_RESERVATION_USD,
+    PUBLIC_BETA_MONTHLY_BUDGET_USD,
     SUPPORTED_VIDEO_SUFFIXES,
     WEB_MAX_CONCURRENT_INPUTS,
     WEB_MAX_CONTAINERS,
@@ -67,6 +69,37 @@ class RateLimitDecision:
     retry_after_seconds: int
     ip_remaining: int
     global_remaining: int
+    budget_remaining_usd: float
+    reason: str | None = None
+
+
+class InvalidByteRangeError(ValueError):
+    """Raised when an HTTP byte range cannot be satisfied."""
+
+
+def parse_byte_range(header: str, total_bytes: int) -> tuple[int, int]:
+    """Parse one RFC 9110 byte range and return inclusive start/end offsets."""
+
+    if total_bytes <= 0 or not header.startswith("bytes="):
+        raise InvalidByteRangeError("Invalid byte range")
+    value = header.removeprefix("bytes=").strip()
+    if not value or "," in value or "-" not in value:
+        raise InvalidByteRangeError("Only one byte range is supported")
+    start_text, end_text = value.split("-", 1)
+    try:
+        if not start_text:
+            suffix_bytes = int(end_text)
+            if suffix_bytes <= 0:
+                raise InvalidByteRangeError("Invalid suffix byte range")
+            return max(0, total_bytes - suffix_bytes), total_bytes - 1
+
+        start = int(start_text)
+        end = total_bytes - 1 if not end_text else int(end_text)
+    except ValueError as error:
+        raise InvalidByteRangeError("Invalid byte range") from error
+    if start < 0 or end < start or start >= total_bytes:
+        raise InvalidByteRangeError("Unsatisfiable byte range")
+    return start, min(end, total_bytes - 1)
 
 
 def evaluate_submission_limit(
@@ -74,18 +107,22 @@ def evaluate_submission_limit(
     client_key: str,
     now: float,
 ) -> tuple[dict[str, object], RateLimitDecision]:
-    """Apply rolling per-client and UTC-day global limits to a persisted record."""
+    """Apply rolling, daily, and monthly public-beta limits to a persisted record."""
 
     current = datetime.fromtimestamp(now, UTC)
     day = current.date().isoformat()
-    if stored is None or stored.get("day") != day:
-        state: dict[str, object] = {"day": day, "global_count": 0, "clients": {}}
-    else:
-        state = {
-            "day": day,
-            "global_count": int(stored.get("global_count", 0)),
-            "clients": dict(stored.get("clients", {})),
-        }
+    month = day[:7]
+    same_day = stored is not None and stored.get("day") == day
+    same_month = stored is not None and stored.get("month") == month
+    state: dict[str, object] = {
+        "day": day,
+        "month": month,
+        "global_count": int(stored.get("global_count", 0)) if same_day else 0,
+        "monthly_reserved_usd": (
+            float(stored.get("monthly_reserved_usd", 0.0)) if same_month else 0.0
+        ),
+        "clients": dict(stored.get("clients", {})) if same_day else {},
+    }
 
     clients = state["clients"]
     assert isinstance(clients, dict)
@@ -95,11 +132,50 @@ def evaluate_submission_limit(
     ]
     clients[client_key] = events
     global_count = int(state["global_count"])
+    monthly_reserved = float(state["monthly_reserved_usd"])
+    budget_remaining = max(0.0, PUBLIC_BETA_MONTHLY_BUDGET_USD - monthly_reserved)
+
+    if monthly_reserved + PUBLIC_BETA_JOB_RESERVATION_USD > PUBLIC_BETA_MONTHLY_BUDGET_USD:
+        if current.month == 12:
+            next_month = current.replace(
+                year=current.year + 1,
+                month=1,
+                day=1,
+                hour=0,
+                minute=0,
+                second=0,
+                microsecond=0,
+            )
+        else:
+            next_month = current.replace(
+                month=current.month + 1,
+                day=1,
+                hour=0,
+                minute=0,
+                second=0,
+                microsecond=0,
+            )
+        retry_after = max(1, int((next_month - current).total_seconds()))
+        return state, RateLimitDecision(
+            False,
+            retry_after,
+            WEB_SUBMISSIONS_PER_IP_HOUR - len(events),
+            WEB_SUBMISSIONS_GLOBAL_DAY - global_count,
+            round(budget_remaining, 2),
+            "monthly_budget",
+        )
 
     if global_count >= WEB_SUBMISSIONS_GLOBAL_DAY:
         next_day = datetime.combine(current.date() + timedelta(days=1), datetime.min.time(), UTC)
         retry_after = max(1, int((next_day - current).total_seconds()))
-        return state, RateLimitDecision(False, retry_after, 0, 0)
+        return state, RateLimitDecision(
+            False,
+            retry_after,
+            WEB_SUBMISSIONS_PER_IP_HOUR - len(events),
+            0,
+            round(budget_remaining, 2),
+            "daily_limit",
+        )
     if len(events) >= WEB_SUBMISSIONS_PER_IP_HOUR:
         retry_after = max(1, int(events[0] + WEB_RATE_LIMIT_WINDOW_SECONDS - now) + 1)
         return state, RateLimitDecision(
@@ -107,15 +183,19 @@ def evaluate_submission_limit(
             retry_after,
             0,
             WEB_SUBMISSIONS_GLOBAL_DAY - global_count,
+            round(budget_remaining, 2),
+            "hourly_limit",
         )
 
     events.append(now)
     state["global_count"] = global_count + 1
+    state["monthly_reserved_usd"] = monthly_reserved + PUBLIC_BETA_JOB_RESERVATION_USD
     return state, RateLimitDecision(
         True,
         0,
         WEB_SUBMISSIONS_PER_IP_HOUR - len(events),
         WEB_SUBMISSIONS_GLOBAL_DAY - global_count - 1,
+        round(budget_remaining - PUBLIC_BETA_JOB_RESERVATION_USD, 2),
     )
 
 
@@ -276,7 +356,6 @@ def public_job_record(record: JobRecord) -> dict[str, object]:
         links = response["links"]
         assert isinstance(links, dict)
         links["score_pdf"] = f"/transcriptions/{job_id}/score.pdf"
-        links["musicxml"] = f"/transcriptions/{job_id}/musicxml"
     if result:
         response["result"] = result
     if "error" in record:
@@ -323,11 +402,12 @@ def create_web_app(*, enforce_submission_limits: bool = True) -> FastAPI:
                     headers={"Retry-After": "30", "Cache-Control": "no-store"},
                 )
             if not decision.allowed:
-                detail = (
-                    "Today's public demo quota is full"
-                    if decision.global_remaining == 0
-                    else "This network has reached its hourly submission limit"
-                )
+                details = {
+                    "monthly_budget": "This month's public beta compute allowance is full",
+                    "daily_limit": "Today's public beta quota is full",
+                    "hourly_limit": "This network has reached its hourly submission limit",
+                }
+                detail = details.get(decision.reason, "The public beta quota is full")
                 return JSONResponse(
                     status_code=429,
                     content={
@@ -338,6 +418,7 @@ def create_web_app(*, enforce_submission_limits: bool = True) -> FastAPI:
                         "Retry-After": str(decision.retry_after_seconds),
                         "X-RateLimit-IP-Remaining": str(decision.ip_remaining),
                         "X-RateLimit-Global-Remaining": str(decision.global_remaining),
+                        "X-Public-Budget-Remaining": f"{decision.budget_remaining_usd:.2f}",
                         "Cache-Control": "no-store",
                     },
                 )
@@ -345,13 +426,19 @@ def create_web_app(*, enforce_submission_limits: bool = True) -> FastAPI:
         response = await call_next(request)
         if request.url.path.startswith("/transcriptions"):
             response.headers["Cache-Control"] = "no-store"
-        elif request.url.path in {"/", "/index.html", "/app.js", "/styles.css"} or (
-            request.url.path.startswith("/jobs/")
-        ):
+        elif request.url.path in {
+            "/",
+            "/index.html",
+            "/how-it-works",
+            "/how-it-works.html",
+            "/app.js",
+            "/styles.css",
+        } or request.url.path.startswith("/jobs/"):
             response.headers["Cache-Control"] = "no-cache"
         if decision is not None:
             response.headers["X-RateLimit-IP-Remaining"] = str(decision.ip_remaining)
             response.headers["X-RateLimit-Global-Remaining"] = str(decision.global_remaining)
+            response.headers["X-Public-Budget-Remaining"] = f"{decision.budget_remaining_usd:.2f}"
         return response
 
     async def lookup_job(job_id: str) -> JobRecord:
@@ -534,24 +621,8 @@ def create_web_app(*, enforce_submission_limits: bool = True) -> FastAPI:
             },
         )
 
-    @web_app.get("/transcriptions/{job_id}/musicxml")
-    async def transcription_musicxml(job_id: str) -> Response:
-        record = await completed_job(job_id)
-        if not record.get("generate_score"):
-            raise HTTPException(status_code=404, detail="This job did not request a score")
-        payload = await artifact(record, "musicxml")
-        return Response(
-            content=payload,
-            media_type="application/vnd.recordare.musicxml+xml",
-            headers={
-                "Content-Disposition": content_disposition(
-                    f"{Path(record['source_name']).stem}-score.musicxml"
-                )
-            },
-        )
-
     @web_app.get("/transcriptions/{job_id}/audio")
-    async def transcription_audio(job_id: str) -> Response:
+    async def transcription_audio(job_id: str, request: Request) -> Response:
         record = await lookup_job(job_id)
         source_suffix = Path(record["paths"]["source"]).suffix.lower()
         if source_suffix in SUPPORTED_VIDEO_SUFFIXES:
@@ -562,21 +633,46 @@ def create_web_app(*, enforce_submission_limits: bool = True) -> FastAPI:
             payload = await artifact(record, "source")
             playback_name = record["source_name"]
             media_type = mimetypes.guess_type(playback_name)[0] or "application/octet-stream"
-        return Response(
-            content=payload,
-            media_type=media_type,
-            headers={
-                "Content-Disposition": content_disposition(playback_name, "inline"),
-                "Accept-Ranges": "none",
-            },
+        total_bytes = len(payload)
+        headers = {
+            "Content-Disposition": content_disposition(playback_name, "inline"),
+            "Accept-Ranges": "bytes",
+        }
+        range_header = request.headers.get("range")
+        if not range_header:
+            headers["Content-Length"] = str(total_bytes)
+            return Response(content=payload, media_type=media_type, headers=headers)
+        try:
+            start, end = parse_byte_range(range_header, total_bytes)
+        except InvalidByteRangeError:
+            return Response(
+                status_code=416,
+                headers={
+                    **headers,
+                    "Content-Range": f"bytes */{total_bytes}",
+                    "Content-Length": "0",
+                },
+            )
+        partial = payload[start : end + 1]
+        headers.update(
+            {
+                "Content-Range": f"bytes {start}-{end}/{total_bytes}",
+                "Content-Length": str(len(partial)),
+            }
         )
+        return Response(content=partial, status_code=206, media_type=media_type, headers=headers)
 
     frontend = _frontend_directory()
     index = frontend / "index.html"
+    how_it_works = frontend / "how-it-works.html"
 
     @web_app.get("/jobs/{job_id}", include_in_schema=False)
     async def job_page(job_id: str) -> FileResponse:
         return FileResponse(index)
+
+    @web_app.get("/how-it-works", include_in_schema=False)
+    async def how_it_works_page() -> FileResponse:
+        return FileResponse(how_it_works)
 
     web_app.mount("/", StaticFiles(directory=frontend, html=True), name="frontend")
     return web_app

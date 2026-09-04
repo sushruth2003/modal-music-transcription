@@ -124,6 +124,24 @@ input:focus-visible,
   box-shadow: 0 0 12px var(--acid);
 }
 
+.topbar-links,
+.footer-links {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+}
+
+.topbar-links > a {
+  color: var(--muted);
+  font-size: 11px;
+  text-decoration: none;
+}
+
+.topbar-links > a:hover,
+.topbar-links > a.active {
+  color: var(--acid);
+}
+
 main {
   padding: 74px 0 44px;
 }
@@ -512,6 +530,14 @@ h2 {
   color: #ff9a8c;
   font-size: 12px;
   line-height: 1.5;
+}
+
+.beta-note {
+  margin: 12px 0 0;
+  color: var(--faint);
+  font-size: 9px;
+  line-height: 1.5;
+  text-align: center;
 }
 
 .job-card {
@@ -950,6 +976,115 @@ footer a {
   text-decoration: none;
 }
 
+.how-page {
+  padding-top: 74px;
+}
+
+.how-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1.3fr) minmax(280px, 0.7fr);
+  align-items: end;
+  gap: 48px;
+  margin-bottom: 70px;
+}
+
+.how-hero .eyebrow {
+  grid-column: 1 / -1;
+  margin-bottom: -28px;
+}
+
+.how-grid {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  border: 1px solid var(--line);
+  background: rgba(24, 27, 23, 0.88);
+  box-shadow: var(--shadow);
+}
+
+.how-grid article {
+  grid-column: span 2;
+  min-height: 260px;
+  padding: 30px;
+  border-right: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+
+.how-grid article:nth-child(3) {
+  border-right: 0;
+}
+
+.how-grid article:nth-child(4),
+.how-grid article:nth-child(5) {
+  grid-column: span 3;
+  border-bottom: 0;
+}
+
+.how-grid article:nth-child(5) {
+  border-right: 0;
+}
+
+.how-grid article > span {
+  display: block;
+  margin-bottom: 56px;
+  color: var(--faint);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+}
+
+.how-grid article > p:last-child,
+.how-note-copy p,
+.beta-card p:last-child {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+.pipeline-strip {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 20px;
+  margin: 28px 0 80px;
+  padding: 18px;
+  color: var(--muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 9px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.pipeline-strip i {
+  color: var(--acid);
+  font-style: normal;
+}
+
+.how-notes,
+.beta-card {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 60px;
+  padding: 44px;
+  border-top: 1px solid var(--line);
+}
+
+.how-note-copy p:first-child {
+  margin-top: 0;
+}
+
+.beta-card {
+  align-items: center;
+  margin-top: 34px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+}
+
+.beta-card .primary-button {
+  width: fit-content;
+  min-width: 210px;
+  margin: 0 0 0 auto;
+  padding: 0 24px;
+}
+
 [hidden] {
   display: none !important;
 }
@@ -962,12 +1097,22 @@ footer a {
   .workspace { grid-template-columns: 1fr; }
   .upload-card { border-right: 0; border-bottom: 1px solid var(--line); }
   .job-card { min-height: 500px; }
+  .how-hero { grid-template-columns: 1fr; gap: 24px; }
+  .how-hero .eyebrow { margin-bottom: -8px; }
+  .how-grid { grid-template-columns: 1fr 1fr; }
+  .how-grid article,
+  .how-grid article:nth-child(4),
+  .how-grid article:nth-child(5) { grid-column: span 1; border-bottom: 1px solid var(--line); }
+  .how-grid article:nth-child(3) { border-right: 1px solid var(--line); }
+  .how-grid article:nth-child(even) { border-right: 0; }
+  .how-grid article:nth-child(5) { grid-column: 1 / -1; border-bottom: 0; }
 }
 
 @media (max-width: 600px) {
   .shell { padding: 0 14px; }
   .topbar { height: 68px; }
   .runtime { display: none; }
+  .topbar-links { gap: 14px; }
   main { padding: 40px 0 28px; }
   h1 { font-size: clamp(45px, 15vw, 68px); }
   .intro { margin-bottom: 38px; }
@@ -988,6 +1133,18 @@ footer a {
   .result-actions { justify-content: flex-start; }
   .score-help { margin-left: 0; }
   footer { padding: 18px 0; }
+  .footer-links { gap: 14px; }
+  .how-page { padding-top: 40px; }
+  .how-hero { margin-bottom: 38px; }
+  .how-grid { grid-template-columns: 1fr; }
+  .how-grid article,
+  .how-grid article:nth-child(4),
+  .how-grid article:nth-child(5) { grid-column: 1; border-right: 0; }
+  .how-grid article > span { margin-bottom: 34px; }
+  .pipeline-strip { flex-wrap: wrap; gap: 10px; margin-bottom: 48px; }
+  .how-notes,
+  .beta-card { grid-template-columns: 1fr; gap: 24px; padding: 28px 20px; }
+  .beta-card .primary-button { width: 100%; margin: 0; }
 }
 
 @media (prefers-reduced-motion: reduce) {

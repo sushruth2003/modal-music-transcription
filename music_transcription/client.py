@@ -147,7 +147,7 @@ def download_artifacts(job_id: str, output_dir: str) -> None:
     destination.mkdir(parents=True, exist_ok=True)
     artifact_names = ["events", "midi", "metrics"]
     if record.get("generate_score"):
-        artifact_names.extend(["score_pdf", "musicxml"])
+        artifact_names.append("score_pdf")
     for artifact_name in artifact_names:
         remote_path = record["paths"][artifact_name]
         local_path = destination / Path(remote_path).name
@@ -164,14 +164,14 @@ def build_parser() -> argparse.ArgumentParser:
     submit = commands.add_parser("submit", help="submit one audio or video file")
     submit.add_argument("--media", required=True)
     submit.add_argument("--instruments")
-    submit.add_argument("--score", action="store_true", help="also render PDF and MusicXML")
+    submit.add_argument("--score", action="store_true", help="also render a PDF score")
     submit.add_argument("--wait", action="store_true")
 
     batch = commands.add_parser("submit-batch", help="submit one directory of media files")
     batch.add_argument("--directory", required=True)
     batch.add_argument("--instruments")
     batch.add_argument("--limit", type=int, default=MAX_M1_BATCH_FILES)
-    batch.add_argument("--score", action="store_true", help="also render PDF and MusicXML")
+    batch.add_argument("--score", action="store_true", help="also render a PDF score")
     batch.add_argument("--wait", action="store_true")
 
     status = commands.add_parser("status", help="read persistent job state")

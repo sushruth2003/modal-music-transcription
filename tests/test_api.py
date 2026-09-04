@@ -15,6 +15,7 @@ ALLOW_SUBMISSION = api.RateLimitDecision(
     retry_after_seconds=0,
     ip_remaining=2,
     global_remaining=9,
+    budget_remaining_usd=9.75,
 )
 
 
@@ -89,6 +90,7 @@ def test_submit_returns_accepted_job_handle(monkeypatch) -> None:
     assert response.headers["location"] == f"/transcriptions/{JOB_ID}"
     assert response.headers["x-ratelimit-ip-remaining"] == "2"
     assert response.headers["x-ratelimit-global-remaining"] == "9"
+    assert response.headers["x-public-budget-remaining"] == "9.75"
     assert response.json() == {
         "job_id": JOB_ID,
         "state": "submitted",
@@ -191,20 +193,18 @@ def test_score_artifact_endpoints_are_conditional(monkeypatch) -> None:
     monkeypatch.setattr(
         api,
         "read_artifact_bytes",
-        lambda path: b"%PDF" if path.endswith(".pdf") else b"<score-partwise />",
+        lambda _path: b"%PDF",
     )
     client = TestClient(api.create_web_app())
 
     status_response = client.get(f"/transcriptions/{JOB_ID}")
     pdf = client.get(f"/transcriptions/{JOB_ID}/score.pdf")
-    musicxml = client.get(f"/transcriptions/{JOB_ID}/musicxml")
 
     assert status_response.json()["links"]["score_pdf"].endswith("/score.pdf")
+    assert "musicxml" not in status_response.json()["links"]
     assert pdf.status_code == 200
     assert pdf.headers["content-type"] == "application/pdf"
     assert "inline" in pdf.headers["content-disposition"]
-    assert musicxml.status_code == 200
-    assert "musicxml" in musicxml.headers["content-type"]
 
 
 def test_video_playback_serves_extracted_audio(monkeypatch) -> None:
@@ -226,6 +226,36 @@ def test_video_playback_serves_extracted_audio(monkeypatch) -> None:
     assert requested_paths == [record["paths"]["normalized"]]
     assert response.headers["content-type"] == "audio/wav"
     assert "performance.wav" in response.headers["content-disposition"]
+    assert response.headers["accept-ranges"] == "bytes"
+
+
+def test_audio_playback_supports_byte_range_seeking(monkeypatch) -> None:
+    record = completed_record()
+    monkeypatch.setattr(api, "get_job", lambda _job_id: record)
+    monkeypatch.setattr(api, "read_artifact_bytes", lambda _path: b"0123456789")
+    client = TestClient(api.create_web_app())
+
+    partial = client.get(
+        f"/transcriptions/{JOB_ID}/audio",
+        headers={"Range": "bytes=3-6"},
+    )
+    suffix = client.get(
+        f"/transcriptions/{JOB_ID}/audio",
+        headers={"Range": "bytes=-2"},
+    )
+    invalid = client.get(
+        f"/transcriptions/{JOB_ID}/audio",
+        headers={"Range": "bytes=50-60"},
+    )
+
+    assert partial.status_code == 206
+    assert partial.content == b"3456"
+    assert partial.headers["content-range"] == "bytes 3-6/10"
+    assert partial.headers["content-length"] == "4"
+    assert suffix.status_code == 206
+    assert suffix.content == b"89"
+    assert invalid.status_code == 416
+    assert invalid.headers["content-range"] == "bytes */10"
 
 
 def test_job_page_and_health_are_served() -> None:
@@ -258,22 +288,29 @@ def test_job_page_and_health_are_served() -> None:
     assert "Paste URL" not in page.text
     assert "Auto-detect instruments" in page.text
     assert "MIDI + score" in page.text
-    assert "/app.js?v=20260904-5" in page.text
-    assert "/styles.css?v=20260904-2" in page.text
+    assert "MusicXML" not in page.text
+    assert "shared $10 monthly compute pool" in page.text
+    assert "/app.js?v=20260904-6" in page.text
+    assert "/styles.css?v=20260904-3" in page.text
+    how_page = client.get("/how-it-works")
+    assert how_page.status_code == 200
+    assert "Align notes to the beat grid" in how_page.text
+    assert how_page.headers["cache-control"] == "no-cache"
 
 
-def test_rate_limit_allows_three_hourly_submissions_then_rejects() -> None:
+def test_rate_limit_allows_two_hourly_submissions_then_rejects() -> None:
     now = 1_800_000_000.0
     state = None
     decisions = []
-    for _ in range(4):
+    for _ in range(3):
         state, decision = api.evaluate_submission_limit(state, "client-a", now)
         decisions.append(decision)
         now += 1
 
-    assert [decision.allowed for decision in decisions] == [True, True, True, False]
-    assert decisions[2].ip_remaining == 0
-    assert decisions[3].retry_after_seconds > 3_500
+    assert [decision.allowed for decision in decisions] == [True, True, False]
+    assert decisions[1].ip_remaining == 0
+    assert decisions[2].retry_after_seconds > 3_500
+    assert decisions[2].reason == "hourly_limit"
 
 
 def test_rate_limit_enforces_global_day_and_resets_next_day() -> None:
@@ -288,7 +325,32 @@ def test_rate_limit_enforces_global_day_and_resets_next_day() -> None:
 
     assert not denied.allowed
     assert denied.global_remaining == 0
+    assert denied.reason == "daily_limit"
     assert next_day.allowed
+
+
+def test_rate_limit_enforces_monthly_reservation_budget_and_resets(monkeypatch) -> None:
+    monkeypatch.setattr(api, "WEB_SUBMISSIONS_GLOBAL_DAY", 100)
+    now = 1_800_000_000.0
+    state = None
+    reservation_count = int(
+        api.PUBLIC_BETA_MONTHLY_BUDGET_USD / api.PUBLIC_BETA_JOB_RESERVATION_USD
+    )
+    for index in range(reservation_count):
+        state, decision = api.evaluate_submission_limit(state, f"client-{index}", now)
+        assert decision.allowed
+
+    state, denied = api.evaluate_submission_limit(state, "one-more", now)
+    _state, next_month = api.evaluate_submission_limit(
+        state,
+        "one-more",
+        now + 32 * 24 * 60 * 60,
+    )
+
+    assert not denied.allowed
+    assert denied.reason == "monthly_budget"
+    assert denied.budget_remaining_usd == 0
+    assert next_month.allowed
 
 
 def test_rate_limit_rejects_before_parsing_upload(monkeypatch) -> None:
@@ -297,6 +359,8 @@ def test_rate_limit_rejects_before_parsing_upload(monkeypatch) -> None:
         retry_after_seconds=60,
         ip_remaining=0,
         global_remaining=7,
+        budget_remaining_usd=4.25,
+        reason="hourly_limit",
     )
     monkeypatch.setattr(api, "reserve_submission", lambda _client_ip: denied)
     client = TestClient(api.create_web_app())
@@ -305,6 +369,7 @@ def test_rate_limit_rejects_before_parsing_upload(monkeypatch) -> None:
 
     assert response.status_code == 429
     assert response.headers["retry-after"] == "60"
+    assert response.headers["x-public-budget-remaining"] == "4.25"
     assert response.json()["retry_after_seconds"] == 60
 
 

@@ -86,7 +86,6 @@ def job_paths(job_id: str, source_suffix: str) -> JobPaths:
         "events": f"{prefix}/events.jsonl",
         "midi": f"{prefix}/transcription.mid",
         "score_pdf": f"{prefix}/score.pdf",
-        "musicxml": f"{prefix}/score.musicxml",
         "metrics": f"{prefix}/metrics.json",
     }
 

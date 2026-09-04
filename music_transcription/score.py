@@ -52,16 +52,14 @@ def render_score_file(midi_path: Path, output_path: Path) -> None:
     volumes={str(ARTIFACT_MOUNT_PATH): artifact_volume},
 )
 def render_score(job_id: str, source_suffix: str) -> dict[str, object]:
-    """Render PDF and MusicXML, then merge score metadata into the job result."""
+    """Render a PDF score, then merge score metadata into the job result."""
 
     paths = job_paths(job_id, source_suffix)
     artifact_volume.reload()
     midi_path = mounted_artifact_path(paths["midi"])
     pdf_path = mounted_artifact_path(paths["score_pdf"])
-    musicxml_path = mounted_artifact_path(paths["musicxml"])
 
     started = time.perf_counter()
-    render_score_file(midi_path, musicxml_path)
     render_score_file(midi_path, pdf_path)
     score_seconds = time.perf_counter() - started
 
@@ -70,11 +68,10 @@ def render_score(job_id: str, source_suffix: str) -> dict[str, object]:
     result["score"] = {
         "seconds": score_seconds,
         "pdf_bytes": pdf_path.stat().st_size,
-        "musicxml_bytes": musicxml_path.stat().st_size,
         "automatic_quantization": True,
     }
     artifacts = dict(result.get("artifacts", {}))
-    artifacts.update({"score_pdf": paths["score_pdf"], "musicxml": paths["musicxml"]})
+    artifacts["score_pdf"] = paths["score_pdf"]
     result["artifacts"] = artifacts
     metrics_path.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     artifact_volume.commit()

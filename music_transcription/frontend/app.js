@@ -19,7 +19,6 @@ const els = {
   resultName: document.querySelector("#result-name"),
   midiDownload: document.querySelector("#midi-download"),
   scoreView: document.querySelector("#score-view"),
-  musicxmlDownload: document.querySelector("#musicxml-download"),
   scoreHelp: document.querySelector("#score-help"),
   audio: document.querySelector("#source-audio"),
   play: document.querySelector("#play-button"),
@@ -258,14 +257,13 @@ async function loadResult(job) {
   state.duration = roll.duration || job.result?.audio_seconds || 0;
   els.resultName.textContent = job.source_name;
   els.audio.src = job.links.audio;
+  els.audio.load();
   els.midiDownload.href = job.links.midi;
-  const hasScore = Boolean(job.links.score_pdf && job.links.musicxml);
+  const hasScore = Boolean(job.links.score_pdf);
   els.scoreView.hidden = !hasScore;
-  els.musicxmlDownload.hidden = !hasScore;
   els.scoreHelp.hidden = !hasScore;
   if (hasScore) {
     els.scoreView.href = job.links.score_pdf;
-    els.musicxmlDownload.href = job.links.musicxml;
   }
   els.totalTime.textContent = formatTime(state.duration);
   els.metricNotes.textContent = job.result?.note_count ?? state.notes.length;
@@ -378,6 +376,15 @@ function updateTransport(time) {
   renderRoll(safe);
 }
 
+function seekSourceAudio(time) {
+  const seek = () => {
+    const duration = Number.isFinite(els.audio.duration) ? els.audio.duration : state.duration;
+    els.audio.currentTime = Math.min(duration || time, Math.max(0, time));
+  };
+  if (els.audio.readyState >= HTMLMediaElement.HAVE_METADATA) seek();
+  else els.audio.addEventListener("loadedmetadata", seek, { once: true });
+}
+
 function stopSynth(keepOffset = true) {
   for (const node of state.synthNodes) {
     try { node.stop(); } catch (_) { /* already stopped */ }
@@ -458,7 +465,7 @@ function setPlaybackMode(mode) {
     button.classList.toggle("active", button.dataset.mode === mode);
   });
   const time = Number(els.timeline.value) / 1000 * state.duration;
-  if (mode === "source") els.audio.currentTime = time;
+  if (mode === "source") seekSourceAudio(time);
   else state.synthOffset = time;
   updateTransport(time);
 }
@@ -507,7 +514,7 @@ els.audio.addEventListener("timeupdate", () => {
 els.audio.addEventListener("ended", () => updateTransport(0));
 els.timeline.addEventListener("input", () => {
   const time = Number(els.timeline.value) / 1000 * state.duration;
-  if (state.playbackMode === "source") els.audio.currentTime = time;
+  if (state.playbackMode === "source") seekSourceAudio(time);
   else {
     const wasPlaying = els.play.classList.contains("playing");
     stopSynth(false);

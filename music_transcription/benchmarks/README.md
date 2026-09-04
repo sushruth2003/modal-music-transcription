@@ -41,8 +41,8 @@ can separate rounds long enough for the current GPU scale-down window, although
 that makes the run substantially slower.
 
 The full matrix creates 123 transcription jobs. Do not point it at the public
-demo: that deployment intentionally allows only three submissions per IP per hour
-and ten submissions globally per day. Create a protected benchmark deployment
+demo: that deployment intentionally allows only two submissions per IP per hour,
+five submissions globally per day, and a small monthly reservation pool. Create a protected benchmark deployment
 with a deliberate cost cap first.
 
 Reports are written under `music_transcription/benchmarks/results/` and ignored by
