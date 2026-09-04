@@ -210,7 +210,8 @@ def test_job_page_and_health_are_served() -> None:
     assert "Transcription preview" in page.text
     assert "Paste URL" in page.text
     assert "MIDI + score" in page.text
-    assert "/app.js?v=20260904-1" in page.text
+    assert "/app.js?v=20260904-2" in page.text
+    assert "Public YouTube videos only" in page.text
 
 
 def test_rate_limit_allows_three_hourly_submissions_then_rejects() -> None:

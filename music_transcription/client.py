@@ -176,7 +176,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Durable MuScriptor jobs on Modal")
     commands = parser.add_subparsers(dest="command", required=True)
 
-    submit = commands.add_parser("submit", help="submit one audio file or public media URL")
+    submit = commands.add_parser("submit", help="submit one audio file or public YouTube URL")
     source = submit.add_mutually_exclusive_group(required=True)
     source.add_argument("--audio")
     source.add_argument("--url")

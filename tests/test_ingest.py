@@ -12,7 +12,6 @@ from music_transcription.ingest import download_command, safe_source_name, valid
     [
         "https://youtu.be/abc123",
         "https://www.youtube.com/watch?v=abc123",
-        "https://www.instagram.com/reel/abc123/",
     ],
 )
 def test_validate_media_url_accepts_supported_public_pages(url: str) -> None:
@@ -23,6 +22,7 @@ def test_validate_media_url_accepts_supported_public_pages(url: str) -> None:
     "url",
     [
         "http://youtu.be/abc123",
+        "https://www.instagram.com/reel/abc123/",
         "https://example.com/video",
         "https://youtube.com.evil.example/watch?v=abc123",
         "https://user:password@youtube.com/watch?v=abc123",

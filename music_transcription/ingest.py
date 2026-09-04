@@ -11,7 +11,7 @@ from urllib.parse import urlsplit, urlunsplit
 from music_transcription.config import (
     ARTIFACT_MOUNT_PATH,
     MAX_AUDIO_SECONDS,
-    SUPPORTED_MEDIA_HOSTS,
+    SUPPORTED_YOUTUBE_HOSTS,
     URL_DOWNLOAD_TIMEOUT_SECONDS,
     WEB_MAX_UPLOAD_BYTES,
 )
@@ -20,20 +20,20 @@ from music_transcription.storage import job_paths, mounted_artifact_path
 
 
 def validate_media_url(value: str) -> str:
-    """Accept only ordinary HTTPS YouTube and Instagram page URLs."""
+    """Accept only ordinary HTTPS YouTube page URLs."""
 
     if len(value) > 2_048:
-        raise ValueError("The media URL is too long")
+        raise ValueError("The YouTube URL is too long")
     parsed = urlsplit(value.strip())
     if parsed.scheme.lower() != "https":
-        raise ValueError("Media URLs must use HTTPS")
+        raise ValueError("YouTube URLs must use HTTPS")
     if parsed.username or parsed.password or parsed.port not in (None, 443):
-        raise ValueError("Media URLs cannot contain credentials or a custom port")
+        raise ValueError("YouTube URLs cannot contain credentials or a custom port")
     hostname = (parsed.hostname or "").lower().rstrip(".")
-    if hostname not in SUPPORTED_MEDIA_HOSTS:
-        raise ValueError("Only public YouTube and Instagram URLs are supported")
+    if hostname not in SUPPORTED_YOUTUBE_HOSTS:
+        raise ValueError("Only public YouTube URLs are supported")
     if not parsed.path or parsed.path == "/":
-        raise ValueError("The URL must point to a specific video or post")
+        raise ValueError("The URL must point to a specific YouTube video")
     return urlunsplit(("https", hostname, parsed.path, parsed.query, ""))
 
 
@@ -47,9 +47,8 @@ def download_command(source_url: str, destination: Path) -> list[str]:
         "--max-downloads",
         "1",
         "--match-filter",
-        # Instagram frequently omits duration from its pre-download metadata.
-        # `<=?` accepts an unknown value; ffprobe enforces the real limit after
-        # download and before any GPU work starts.
+        # `<=?` accepts missing pre-download duration metadata; ffprobe enforces
+        # the real limit after download and before any GPU work starts.
         f"!is_live & duration <=? {MAX_AUDIO_SECONDS}",
         "--max-filesize",
         str(WEB_MAX_UPLOAD_BYTES),

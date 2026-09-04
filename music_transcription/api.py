@@ -404,7 +404,7 @@ def create_web_app(*, enforce_submission_limits: bool = True) -> FastAPI:
         if (audio is None) == (normalized_url is None):
             raise HTTPException(
                 status_code=400,
-                detail="Provide exactly one source: an upload or a public media URL",
+                detail="Provide exactly one source: an upload or a public YouTube URL",
             )
 
         try:

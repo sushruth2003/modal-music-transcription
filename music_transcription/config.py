@@ -32,11 +32,8 @@ MAX_AUDIO_SECONDS = 10 * 60
 MAX_M1_BATCH_FILES = 4
 SUPPORTED_AUDIO_SUFFIXES = frozenset({".flac", ".m4a", ".mp3", ".ogg", ".wav"})
 URL_SOURCE_SUFFIX = ".flac"
-SUPPORTED_MEDIA_HOSTS = frozenset(
+SUPPORTED_YOUTUBE_HOSTS = frozenset(
     {
-        "instagram.com",
-        "www.instagram.com",
-        "m.instagram.com",
         "youtube.com",
         "www.youtube.com",
         "m.youtube.com",

@@ -9,7 +9,7 @@
     />
     <title>Auto Transcribe</title>
     <link rel="stylesheet" href="/styles.css?v=20260904-1" />
-    <script src="/app.js?v=20260904-1" defer></script>
+    <script src="/app.js?v=20260904-2" defer></script>
   </head>
   <body>
     <div class="shell">
@@ -28,7 +28,7 @@
           <p class="eyebrow">Recording → note events → MIDI or score</p>
           <h1 id="page-title">Hear the structure<br />inside the song.</h1>
           <p class="lede">
-            Upload a recording or import a public link. Auto Transcribe turns its musical events
+            Upload a recording or import a public YouTube video. Auto Transcribe turns its musical events
             into an instrument-aware piano roll, MIDI, and optional sheet music.
           </p>
         </section>
@@ -66,7 +66,7 @@
 
             <div id="url-source" class="url-source" hidden>
               <label class="field" for="source-url">
-                <span>Public media URL</span>
+                <span>Public YouTube URL</span>
                 <input
                   id="source-url"
                   name="source_url"
@@ -76,7 +76,7 @@
                   autocomplete="url"
                 />
               </label>
-              <p>Public YouTube and Instagram posts only. Playlists, live, private, and login-only media are not supported.</p>
+              <p>Public YouTube videos only. Playlists, live, private, age-restricted, and login-only videos are not supported.</p>
             </div>
 
             <label class="field" for="instruments">

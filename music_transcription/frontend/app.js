@@ -135,7 +135,7 @@ async function handleSubmit(event) {
     return;
   }
   if (state.inputMode === "url" && !sourceUrl) {
-    els.formError.textContent = "Paste a public YouTube or Instagram URL first.";
+    els.formError.textContent = "Paste a public YouTube URL first.";
     els.formError.hidden = false;
     return;
   }

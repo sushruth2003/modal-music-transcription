@@ -32,16 +32,16 @@ uv run modal deploy -m music_transcription.pipeline
 ```
 
 Modal prints the web URL after deployment. Open it to upload a WAV, FLAC, MP3,
-M4A, or OGG file (up to 100 MB), or paste a public YouTube or Instagram URL.
+M4A, or OGG file (up to 100 MB), or paste a public YouTube URL.
 Choose MIDI alone or MIDI plus a printable PDF and editable MusicXML score. The
 page also provides original-audio playback, a synthesized note preview, and a
 synchronized piano roll.
 
-URL import is deliberately limited to public, single-item YouTube and Instagram
-pages. It does not accept playlists, live streams, private/login-only media, or
-cookies. Use it only for media you own or have permission to process. Site
-extractors can occasionally break when those services change. Every input is
-limited to ten minutes and 100 MB before GPU inference. The public demo accepts
+URL import is deliberately limited to public, single-video YouTube pages. It
+does not accept playlists, live streams, private/login-only media, or cookies.
+Use it only for media you own or have permission to process. The extractor can
+occasionally break when YouTube changes. Every input is limited to ten minutes
+and 100 MB before GPU inference. The public demo accepts
 at most three submissions per IP address per rolling hour and ten submissions
 globally per UTC day.
 
@@ -144,7 +144,7 @@ jobs/{job_id}/
 |---|---|
 | FastAPI ASGI Function | Accept uploads, return job handles, and serve status/artifacts |
 | CPU `process_job` Function | Normalize one recording and coordinate its GPU call |
-| CPU URL-import Function | Validate and extract one public YouTube/Instagram item to FLAC |
+| CPU URL-import Function | Validate and extract one public YouTube video to FLAC |
 | L4 GPU class | Keep MuScriptor resident while warm and run inference |
 | CPU score Function | Import MIDI into MuseScore and export PDF plus MusicXML |
 | Model Volume | Persist the static, pinned checkpoint independently of containers |
