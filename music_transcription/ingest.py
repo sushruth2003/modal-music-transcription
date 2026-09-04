@@ -8,6 +8,8 @@ import subprocess
 from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 
+import modal
+
 from music_transcription.config import (
     ARTIFACT_MOUNT_PATH,
     MAX_AUDIO_SECONDS,
@@ -44,8 +46,6 @@ def download_command(source_url: str, destination: Path) -> list[str]:
     return [
         "yt-dlp",
         "--no-playlist",
-        "--max-downloads",
-        "1",
         "--match-filter",
         # `<=?` accepts missing pre-download duration metadata; ffprobe enforces
         # the real limit after download and before any GPU work starts.
@@ -84,8 +84,26 @@ def safe_source_name(title: str) -> str:
     return f"{(compact or 'Imported recording')[:180]}.flac"
 
 
+def download_error_message(stderr: str) -> str:
+    """Return a safe, actionable message for a failed yt-dlp process."""
+
+    bot_check_messages = (
+        "Sign in to confirm you’re not a bot",
+        "confirm you're not a bot",
+    )
+    if any(message in stderr for message in bot_check_messages):
+        return (
+            "YouTube blocked the server download. Try the URL again, or download the audio "
+            "locally and upload the file instead."
+        )
+    return (
+        "Could not import that YouTube video. Confirm it is public, is not a live stream, "
+        "and is no longer than 10 minutes."
+    )
+
+
 def download_media(source_url: str, destination: Path) -> dict[str, object]:
-    """Download one public post and return sanitized source metadata."""
+    """Download one public YouTube video and return sanitized source metadata."""
 
     normalized_url = validate_media_url(source_url)
     destination.parent.mkdir(parents=True, exist_ok=True)
@@ -97,10 +115,7 @@ def download_media(source_url: str, destination: Path) -> dict[str, object]:
         timeout=URL_DOWNLOAD_TIMEOUT_SECONDS,
     )
     if completed.returncode != 0:
-        raise RuntimeError(
-            "Could not import that media. Confirm it is public, is not a playlist or live "
-            "stream, and is no longer than 10 minutes."
-        )
+        raise RuntimeError(download_error_message(completed.stderr))
     if not destination.is_file() or destination.stat().st_size == 0:
         raise RuntimeError("The media importer did not produce an audio file")
     if destination.stat().st_size > WEB_MAX_UPLOAD_BYTES:
@@ -131,6 +146,12 @@ def download_media(source_url: str, destination: Path) -> dict[str, object]:
     memory=2048,
     timeout=URL_DOWNLOAD_TIMEOUT_SECONDS,
     max_containers=4,
+    retries=modal.Retries(
+        max_retries=2,
+        backoff_coefficient=1.0,
+        initial_delay=1.0,
+    ),
+    single_use_containers=True,
     volumes={str(ARTIFACT_MOUNT_PATH): artifact_volume},
 )
 def fetch_media_url(job_id: str, source_suffix: str, source_url: str) -> dict[str, object]:

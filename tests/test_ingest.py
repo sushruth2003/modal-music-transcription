@@ -4,7 +4,12 @@ from pathlib import Path
 
 import pytest
 
-from music_transcription.ingest import download_command, safe_source_name, validate_media_url
+from music_transcription.ingest import (
+    download_command,
+    download_error_message,
+    safe_source_name,
+    validate_media_url,
+)
 
 
 @pytest.mark.parametrize(
@@ -38,7 +43,9 @@ def test_download_command_is_bounded_and_deterministic() -> None:
     command = download_command("https://youtu.be/abc123", Path("/artifacts/source.flac"))
 
     assert "--no-playlist" in command
-    assert command[command.index("--max-downloads") + 1] == "1"
+    # yt-dlp exits with code 101 when --max-downloads reaches its limit, even
+    # after successfully producing the first file. --no-playlist is sufficient.
+    assert "--max-downloads" not in command
     assert command[command.index("--match-filter") + 1] == "!is_live & duration <=? 600"
     assert command[command.index("--audio-format") + 1] == "flac"
     assert command[command.index("--output") + 1] == "/artifacts/source.%(ext)s"
@@ -46,3 +53,10 @@ def test_download_command_is_bounded_and_deterministic() -> None:
 
 def test_safe_source_name_removes_path_and_header_characters() -> None:
     assert safe_source_name("  Song / demo\\take\n2  ") == "Song demo take 2.flac"
+
+
+def test_download_error_explains_youtube_bot_block() -> None:
+    message = download_error_message("Sign in to confirm you’re not a bot")
+
+    assert "YouTube blocked the server download" in message
+    assert "upload the file instead" in message
