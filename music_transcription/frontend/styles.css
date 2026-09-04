@@ -309,6 +309,105 @@ h2 {
   color: #696c67;
 }
 
+.instrument-picker {
+  position: relative;
+}
+
+.instrument-picker summary {
+  min-height: 46px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 0 13px;
+  border: 1px solid var(--line);
+  color: var(--ink);
+  background: #121411;
+  font-size: 13px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.instrument-picker summary::-webkit-details-marker {
+  display: none;
+}
+
+.instrument-picker summary::after {
+  content: "+";
+  color: var(--acid);
+  font-size: 18px;
+  line-height: 1;
+}
+
+.instrument-picker[open] summary::after {
+  content: "−";
+}
+
+.instrument-picker summary small {
+  margin-left: auto;
+}
+
+.instrument-menu {
+  position: absolute;
+  z-index: 10;
+  width: 100%;
+  max-height: min(430px, 60vh);
+  overflow: auto;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-top: 0;
+  background: #181b17;
+  box-shadow: 0 18px 45px rgba(0, 0, 0, 0.42);
+}
+
+.instrument-menu > p {
+  margin: 0 0 14px;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.instrument-options {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.instrument-options fieldset {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.instrument-options legend {
+  margin-bottom: 7px;
+  color: var(--faint);
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.instrument-options label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 28px;
+  color: #d7d8d2;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.instrument-options input {
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  padding: 0;
+  flex: 0 0 auto;
+  background: transparent;
+  accent-color: var(--acid);
+}
+
 .output-choice {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -879,6 +978,7 @@ footer a {
   .playback-help { margin-left: 0; }
   .roll-toolbar { align-items: flex-start; }
   .roll-legend { display: none; }
+  .instrument-options { grid-template-columns: 1fr; }
   .piano-roll { height: 220px; }
   .metrics { grid-template-columns: repeat(2, 1fr); }
   .metrics div:nth-child(3) { border-left: 0; border-top: 1px solid var(--line); }

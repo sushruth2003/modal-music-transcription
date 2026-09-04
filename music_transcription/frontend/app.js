@@ -2,7 +2,8 @@ const els = {
   form: document.querySelector("#upload-form"),
   file: document.querySelector("#audio-file"),
   fileLabel: document.querySelector("#file-label"),
-  instruments: document.querySelector("#instruments"),
+  instrumentSummary: document.querySelector("#instrument-summary"),
+  instrumentOptions: document.querySelector("#instrument-options"),
   dropZone: document.querySelector("#drop-zone"),
   submit: document.querySelector("#submit-button"),
   formError: document.querySelector("#form-error"),
@@ -55,6 +56,49 @@ const stageOrder = ["submitted", "preprocessing", "transcribing", "rendering", "
 
 function wantsScore() {
   return document.querySelector('input[name="output"]:checked')?.value === "score";
+}
+
+function selectedInstruments() {
+  return Array.from(els.instrumentOptions.querySelectorAll('input[type="checkbox"]:checked'))
+    .map((input) => input.value);
+}
+
+function updateInstrumentSummary() {
+  const selected = selectedInstruments();
+  els.instrumentSummary.textContent = selected.length
+    ? `${selected.length} instrument${selected.length === 1 ? "" : "s"} selected`
+    : "Auto-detect instruments";
+}
+
+async function loadInstrumentOptions() {
+  try {
+    const payload = await getJson("/api/instruments");
+    const fragment = document.createDocumentFragment();
+    for (const group of payload.groups || []) {
+      const fieldset = document.createElement("fieldset");
+      const legend = document.createElement("legend");
+      legend.textContent = group.label;
+      fieldset.append(legend);
+      for (const option of group.options || []) {
+        const label = document.createElement("label");
+        const input = document.createElement("input");
+        const text = document.createElement("span");
+        input.type = "checkbox";
+        input.name = "instrument";
+        input.value = option.value;
+        input.addEventListener("change", updateInstrumentSummary);
+        text.textContent = option.label;
+        label.append(input, text);
+        fieldset.append(label);
+      }
+      fragment.append(fieldset);
+    }
+    els.instrumentOptions.replaceChildren(fragment);
+  } catch (_) {
+    const message = document.createElement("p");
+    message.textContent = "Instrument choices are unavailable. Auto-detect will be used.";
+    els.instrumentOptions.replaceChildren(message);
+  }
 }
 
 function showView(name) {
@@ -129,7 +173,8 @@ async function handleSubmit(event) {
 
   const body = new FormData();
   body.append("media", file);
-  if (els.instruments.value.trim()) body.append("instruments", els.instruments.value.trim());
+  const instruments = selectedInstruments();
+  if (instruments.length) body.append("instruments", instruments.join(","));
   body.append("generate_score", String(wantsScore()));
 
   try {
@@ -419,6 +464,7 @@ function setPlaybackMode(mode) {
 }
 
 function initialize() {
+  loadInstrumentOptions();
   const jobMatch = window.location.pathname.match(/^\/jobs\/([0-9a-f]{32})$/);
   if (jobMatch) state.jobId = jobMatch[1];
   if (state.jobId) {

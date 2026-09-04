@@ -340,7 +340,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--request-timeout", type=float, default=60.0)
     parser.add_argument("--job-timeout", type=float, default=15 * 60.0)
     parser.add_argument("--round-delay", type=float, default=0.0)
-    parser.add_argument("--instruments", help="Comma-separated instrument hints")
+    parser.add_argument("--instruments", help="Comma-separated canonical instrument names")
     parser.add_argument("--label", default="m2-load")
     parser.add_argument("--output", type=Path)
     parser.add_argument(

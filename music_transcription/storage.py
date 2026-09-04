@@ -11,6 +11,7 @@ from uuid import uuid4
 
 from music_transcription.config import (
     ARTIFACT_MOUNT_PATH,
+    MUSCRIPTOR_INSTRUMENT_NAMES,
     SUPPORTED_SOURCE_SUFFIXES,
 )
 from music_transcription.resources import artifact_volume, job_states
@@ -32,6 +33,7 @@ def new_job_spec(
     suffix = Path(source_name).suffix.lower()
     if suffix not in SUPPORTED_SOURCE_SUFFIXES:
         raise ValueError(f"Unsupported source suffix: {suffix!r}")
+    instruments = validate_instrument_names(instruments)
     return {
         "job_id": uuid4().hex,
         "source_name": Path(source_name).name,
@@ -42,12 +44,24 @@ def new_job_spec(
 
 
 def parse_instruments(value: str | None) -> list[str] | None:
-    """Normalize comma-separated instrument hints from a CLI or form."""
+    """Parse and strictly validate canonical MuScriptor instrument names."""
 
     if value is None:
         return None
     instruments = [item.strip() for item in value.split(",") if item.strip()]
-    return instruments or None
+    return validate_instrument_names(instruments or None)
+
+
+def validate_instrument_names(instruments: list[str] | None) -> list[str] | None:
+    """Reject non-canonical hints before a job can reach the GPU."""
+
+    if not instruments:
+        return None
+    allowed = frozenset(MUSCRIPTOR_INSTRUMENT_NAMES)
+    unknown = sorted(set(instruments) - allowed)
+    if unknown:
+        raise ValueError(f"Unsupported instrument selection: {', '.join(unknown)}")
+    return list(dict.fromkeys(instruments))
 
 
 def validate_job_id(job_id: str) -> str:

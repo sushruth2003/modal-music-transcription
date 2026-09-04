@@ -71,7 +71,7 @@ def test_submit_returns_accepted_job_handle(monkeypatch) -> None:
         "job_id": JOB_ID,
         "source_name": "demo.wav",
         "source_suffix": ".wav",
-        "instruments": ["piano"],
+        "instruments": ["acoustic_piano"],
     }
     monkeypatch.setattr(api, "stage_uploaded_file", lambda *_args: (spec, 5))
     monkeypatch.setattr(api, "spawn_process_job", lambda _spec: "fc-123")
@@ -81,7 +81,7 @@ def test_submit_returns_accepted_job_handle(monkeypatch) -> None:
     response = client.post(
         "/transcriptions",
         files={"media": ("demo.wav", b"audio", "audio/wav")},
-        data={"instruments": "piano"},
+        data={"instruments": "acoustic_piano"},
     )
 
     assert response.status_code == 202
@@ -132,6 +132,23 @@ def test_submit_rejects_missing_file_and_removed_url_input(monkeypatch) -> None:
 
     assert missing.status_code == 400
     assert old_url_input.status_code == 400
+
+
+def test_submit_rejects_unknown_instrument_before_spawning(monkeypatch) -> None:
+    spawned = []
+    monkeypatch.setattr(api, "spawn_process_job", spawned.append)
+    monkeypatch.setattr(api, "reserve_submission", lambda _client_ip: ALLOW_SUBMISSION)
+    client = TestClient(api.create_web_app())
+
+    response = client.post(
+        "/transcriptions",
+        files={"media": ("demo.wav", b"audio", "audio/wav")},
+        data={"instruments": "grand_piano"},
+    )
+
+    assert response.status_code == 400
+    assert "Unsupported instrument selection" in response.json()["detail"]
+    assert spawned == []
 
 
 def test_status_and_piano_roll_endpoints(monkeypatch) -> None:
@@ -214,6 +231,16 @@ def test_job_page_and_health_are_served() -> None:
     client = TestClient(api.create_web_app())
 
     assert client.get("/api/health").json() == {"status": "ok"}
+    instrument_payload = client.get("/api/instruments").json()
+    options = [option for group in instrument_payload["groups"] for option in group["options"]]
+    values = [option["value"] for option in options]
+    assert len(values) == len(set(values)) == 35
+    assert {option["value"] for option in options} >= {
+        "acoustic_piano",
+        "distorted_electric_guitar",
+        "drums",
+    }
+    assert {option["label"] for option in options} >= {"Soprano & Alto Sax"}
     assert client.get("/app.js").headers["cache-control"] == "no-cache"
     page = client.get(f"/jobs/{JOB_ID}")
     assert page.status_code == 200
@@ -222,8 +249,10 @@ def test_job_page_and_health_are_served() -> None:
     assert "Transcription preview" in page.text
     assert "Drop audio or video here" in page.text
     assert "Paste URL" not in page.text
+    assert "Auto-detect instruments" in page.text
     assert "MIDI + score" in page.text
-    assert "/app.js?v=20260904-3" in page.text
+    assert "/app.js?v=20260904-4" in page.text
+    assert "/styles.css?v=20260904-2" in page.text
 
 
 def test_rate_limit_allows_three_hourly_submissions_then_rejects() -> None:

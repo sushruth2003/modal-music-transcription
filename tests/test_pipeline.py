@@ -7,8 +7,13 @@ from music_transcription.client import discover_sources, parse_instruments, vali
 
 def test_parse_instruments() -> None:
     assert parse_instruments(None) is None
-    assert parse_instruments("  piano, drums ,, bass ") == ["piano", "drums", "bass"]
+    assert parse_instruments(" acoustic_piano, drums, acoustic_piano ") == [
+        "acoustic_piano",
+        "drums",
+    ]
     assert parse_instruments(" , ") is None
+    with pytest.raises(ValueError, match="Unsupported instrument selection: piano"):
+        parse_instruments("piano")
 
 
 def test_discover_sources_is_sorted_and_filters_unsupported_files(tmp_path) -> None:

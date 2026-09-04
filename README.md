@@ -35,7 +35,9 @@ Modal prints the web URL after deployment. Open it to upload a WAV, FLAC, MP3,
 M4A, OGG, MP4, MOV, WebM, or MKV file (up to 100 MB and ten minutes).
 Choose MIDI alone or MIDI plus a printable PDF and editable MusicXML score. The
 page also provides source-audio playback, a synthesized note preview, and a
-synchronized piano roll.
+synchronized piano roll. Instrument conditioning is optional: leave the picker
+empty for auto-detection, or select from MuScriptor's exact supported taxonomy.
+Selected instruments are hard constraints, not descriptive prompts.
 
 The app intentionally does not fetch remote URLs. Download a video you own or
 have permission to process, then upload the file; FFmpeg extracts its audio track
@@ -51,6 +53,7 @@ The CLI remains useful for automation and batches:
 ```bash
 uv run python -m music_transcription.client submit \
   --media data/synthetic-chords-30s.wav \
+  --instruments acoustic_piano,drums \
   --score \
   --wait
 

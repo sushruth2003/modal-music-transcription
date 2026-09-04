@@ -10,13 +10,13 @@ def test_new_job_spec_and_paths(monkeypatch) -> None:
         hex = "a" * 32
 
     monkeypatch.setattr(storage, "uuid4", lambda: FixedUuid())
-    spec = storage.new_job_spec("../demo.MP3", ["piano"])
+    spec = storage.new_job_spec("../demo.MP3", ["acoustic_piano"])
 
     assert spec == {
         "job_id": "a" * 32,
         "source_name": "demo.MP3",
         "source_suffix": ".mp3",
-        "instruments": ["piano"],
+        "instruments": ["acoustic_piano"],
         "generate_score": False,
     }
     assert storage.job_paths(spec["job_id"], spec["source_suffix"])["source"] == (
@@ -38,6 +38,11 @@ def test_video_job_spec_and_paths(monkeypatch) -> None:
     assert spec["source_suffix"] == ".mp4"
     assert record["paths"]["source"].endswith("/source.mp4")
     assert record["generate_score"] is True
+
+
+def test_new_job_spec_rejects_noncanonical_instrument() -> None:
+    with pytest.raises(ValueError, match="Unsupported instrument selection: piano"):
+        storage.new_job_spec("demo.wav", ["piano"])
 
 
 @pytest.mark.parametrize("job_id", ["short", "A" * 32, "../" + "a" * 29])

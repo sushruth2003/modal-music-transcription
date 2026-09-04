@@ -22,7 +22,7 @@ from fastapi.staticfiles import StaticFiles
 from music_transcription.config import (
     FRONTEND_MOUNT_PATH,
     L4_PRICE_PER_SECOND_USD,
-    MAX_INSTRUMENT_HINTS,
+    MUSCRIPTOR_INSTRUMENT_GROUPS,
     SUPPORTED_VIDEO_SUFFIXES,
     WEB_MAX_CONCURRENT_INPUTS,
     WEB_MAX_CONTAINERS,
@@ -149,14 +149,7 @@ def copy_limited(source: BinaryIO, destination: Path, max_bytes: int) -> int:
 
 
 def validate_instruments(value: str | None) -> list[str] | None:
-    instruments = parse_instruments(value)
-    if instruments is None:
-        return None
-    if len(instruments) > MAX_INSTRUMENT_HINTS:
-        raise ValueError(f"At most {MAX_INSTRUMENT_HINTS} instrument hints are allowed")
-    if any(len(instrument) > 64 for instrument in instruments):
-        raise ValueError("Instrument hints must be 64 characters or fewer")
-    return instruments
+    return parse_instruments(value)
 
 
 def stage_uploaded_file(
@@ -387,6 +380,24 @@ def create_web_app(*, enforce_submission_limits: bool = True) -> FastAPI:
     @web_app.get("/api/health")
     async def health() -> dict[str, str]:
         return {"status": "ok"}
+
+    @web_app.get("/api/instruments")
+    async def instruments() -> dict[str, object]:
+        return {
+            "groups": [
+                {
+                    "label": group,
+                    "options": [
+                        {
+                            "value": name,
+                            "label": name.replace("_and_", " & ").replace("_", " ").title(),
+                        }
+                        for name in names
+                    ],
+                }
+                for group, names in MUSCRIPTOR_INSTRUMENT_GROUPS
+            ]
+        }
 
     @web_app.post("/transcriptions", status_code=status.HTTP_202_ACCEPTED)
     async def submit_transcription(

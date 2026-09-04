@@ -34,6 +34,54 @@ SUPPORTED_AUDIO_SUFFIXES = frozenset({".flac", ".m4a", ".mp3", ".ogg", ".wav"})
 SUPPORTED_VIDEO_SUFFIXES = frozenset({".mkv", ".mov", ".mp4", ".webm"})
 SUPPORTED_SOURCE_SUFFIXES = SUPPORTED_AUDIO_SUFFIXES | SUPPORTED_VIDEO_SUFFIXES
 
+# Exact MT3_FULL_PLUS names accepted by the pinned muscriptor==0.3.0 package.
+# An empty selection means unconstrained instrument detection.
+MUSCRIPTOR_INSTRUMENT_GROUPS = (
+    ("Keyboards", ("acoustic_piano", "electric_piano", "organ")),
+    (
+        "Guitars & bass",
+        (
+            "acoustic_guitar",
+            "clean_electric_guitar",
+            "distorted_electric_guitar",
+            "acoustic_bass",
+            "electric_bass",
+        ),
+    ),
+    (
+        "Strings & voice",
+        (
+            "violin",
+            "viola",
+            "cello",
+            "contrabass",
+            "orchestral_harp",
+            "string_ensemble",
+            "synth_strings",
+            "voice",
+        ),
+    ),
+    ("Percussion", ("chromatic_percussion", "timpani", "drums")),
+    ("Brass", ("trumpet", "trombone", "tuba", "french_horn", "brass_section")),
+    (
+        "Woodwinds",
+        (
+            "soprano_and_alto_sax",
+            "tenor_sax",
+            "baritone_sax",
+            "oboe",
+            "english_horn",
+            "bassoon",
+            "clarinet",
+            "flutes",
+        ),
+    ),
+    ("Synths & effects", ("orchestra_hit", "synth_lead", "synth_pad")),
+)
+MUSCRIPTOR_INSTRUMENT_NAMES = tuple(
+    name for _group, names in MUSCRIPTOR_INSTRUMENT_GROUPS for name in names
+)
+
 FASTAPI_PACKAGE = "fastapi==0.141.1"
 MULTIPART_PACKAGE = "python-multipart==0.0.32"
 FRONTEND_MOUNT_PATH = Path("/frontend")
@@ -42,7 +90,6 @@ WEB_MAX_CONCURRENT_INPUTS = 25
 WEB_TARGET_CONCURRENT_INPUTS = 10
 WEB_MAX_UPLOAD_BYTES = 100 * 1024 * 1024
 WEB_UPLOAD_CHUNK_BYTES = 1024 * 1024
-MAX_INSTRUMENT_HINTS = 16
 WEB_SUBMISSIONS_PER_IP_HOUR = 3
 WEB_SUBMISSIONS_GLOBAL_DAY = 10
 WEB_RATE_LIMIT_WINDOW_SECONDS = 60 * 60

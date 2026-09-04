@@ -8,8 +8,8 @@
       content="Turn an uploaded audio or video recording into MIDI and readable sheet music."
     />
     <title>Auto Transcribe</title>
-    <link rel="stylesheet" href="/styles.css?v=20260904-1" />
-    <script src="/app.js?v=20260904-3" defer></script>
+    <link rel="stylesheet" href="/styles.css?v=20260904-2" />
+    <script src="/app.js?v=20260904-4" defer></script>
   </head>
   <body>
     <div class="shell">
@@ -59,16 +59,21 @@
               <span class="drop-copy">or browse · audio, MP4, MOV, WebM, MKV · 100 MB · 10 min max</span>
             </label>
 
-            <label class="field" for="instruments">
-              <span>Instrument hints <small>optional</small></span>
-              <input
-                id="instruments"
-                name="instruments"
-                type="text"
-                placeholder="piano, drums, electric bass"
-                autocomplete="off"
-              />
-            </label>
+            <div class="field instrument-field">
+              <span>Expected instruments <small>optional</small></span>
+              <details id="instrument-picker" class="instrument-picker">
+                <summary>
+                  <span id="instrument-summary">Auto-detect instruments</span>
+                  <small>Choose</small>
+                </summary>
+                <div class="instrument-menu">
+                  <p>Select only instruments you know are present. This restricts what the model can emit.</p>
+                  <div id="instrument-options" class="instrument-options" aria-live="polite">
+                    <p>Loading instrument choices…</p>
+                  </div>
+                </div>
+              </details>
+            </div>
 
             <fieldset class="output-choice">
               <legend>Output</legend>
