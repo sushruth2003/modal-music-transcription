@@ -356,6 +356,10 @@ def create_web_app(*, enforce_submission_limits: bool = True) -> FastAPI:
         response = await call_next(request)
         if request.url.path.startswith("/transcriptions"):
             response.headers["Cache-Control"] = "no-store"
+        elif request.url.path in {"/", "/index.html", "/app.js", "/styles.css"} or (
+            request.url.path.startswith("/jobs/")
+        ):
+            response.headers["Cache-Control"] = "no-cache"
         if decision is not None:
             response.headers["X-RateLimit-IP-Remaining"] = str(decision.ip_remaining)
             response.headers["X-RateLimit-Global-Remaining"] = str(decision.global_remaining)

@@ -202,6 +202,7 @@ def test_job_page_and_health_are_served() -> None:
     client = TestClient(api.create_web_app())
 
     assert client.get("/api/health").json() == {"status": "ok"}
+    assert client.get("/app.js").headers["cache-control"] == "no-cache"
     page = client.get(f"/jobs/{JOB_ID}")
     assert page.status_code == 200
     assert "Auto Transcribe" in page.text
@@ -209,6 +210,7 @@ def test_job_page_and_health_are_served() -> None:
     assert "Transcription preview" in page.text
     assert "Paste URL" in page.text
     assert "MIDI + score" in page.text
+    assert "/app.js?v=20260904-1" in page.text
 
 
 def test_rate_limit_allows_three_hourly_submissions_then_rejects() -> None:
