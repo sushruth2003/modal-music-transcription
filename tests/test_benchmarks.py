@@ -33,12 +33,14 @@ def test_summarize_groups_status_latency_and_cost() -> None:
                 "inference_seconds": 4.0,
                 "estimated_gpu_cost_usd": 0.001,
             },
+            "worker": {"container_id": "gpu-a", "gpu_name": "NVIDIA L4"},
         },
         {
             "concurrency": 2,
             "submit_status": 202,
             "terminal_state": "failed",
             "metrics": {"submit_seconds": 0.3, "end_to_end_seconds": 12.0},
+            "worker": {"container_id": "gpu-b", "gpu_name": "NVIDIA L4"},
         },
     ]
 
@@ -55,5 +57,7 @@ def test_summarize_groups_status_latency_and_cost() -> None:
             "end_to_end_seconds": {"p50": 11.0, "p95": 11.9, "max": 12.0},
             "inference_seconds_p50": 4.0,
             "estimated_inference_gpu_cost_usd": 0.001,
+            "distinct_gpu_containers": 2,
+            "gpu_container_ids": ["gpu-a", "gpu-b"],
         }
     ]

@@ -77,6 +77,13 @@ def summarize(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
         estimated_cost = _metric_values(group, "estimated_gpu_cost_usd")
         states = Counter(str(record.get("terminal_state", "not_accepted")) for record in group)
         statuses = Counter(str(record.get("submit_status", "transport_error")) for record in group)
+        gpu_container_ids = sorted(
+            {
+                str(record["worker"]["container_id"])
+                for record in group
+                if isinstance(record.get("worker"), dict) and record["worker"].get("container_id")
+            }
+        )
         summaries.append(
             {
                 "concurrency": concurrency,
@@ -98,6 +105,8 @@ def summarize(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 },
                 "inference_seconds_p50": _rounded(percentile(inference, 0.50)),
                 "estimated_inference_gpu_cost_usd": round(sum(estimated_cost), 6),
+                "distinct_gpu_containers": len(gpu_container_ids),
+                "gpu_container_ids": gpu_container_ids,
             }
         )
     return summaries
@@ -243,6 +252,13 @@ async def run_job(
             "created_at": payload.get("created_at"),
             "updated_at": payload.get("updated_at"),
         }
+        result = payload.get("result")
+        model = result.get("model") if isinstance(result, dict) else None
+        if isinstance(model, dict):
+            record["worker"] = {
+                "container_id": model.get("container_id"),
+                "gpu_name": model.get("gpu_name"),
+            }
         record["metrics"].update(_result_metrics(payload, elapsed))
         if state == "failed":
             record["error"] = payload.get("error", "job failed without an error message")

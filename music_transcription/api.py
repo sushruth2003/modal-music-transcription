@@ -292,7 +292,7 @@ def _frontend_directory() -> Path:
     return FRONTEND_MOUNT_PATH if FRONTEND_MOUNT_PATH.is_dir() else LOCAL_FRONTEND_PATH
 
 
-def create_web_app() -> FastAPI:
+def create_web_app(*, enforce_submission_limits: bool = True) -> FastAPI:
     """Construct the ASGI app. Kept separate so HTTP behavior is unit-testable."""
 
     web_app = FastAPI(
@@ -305,7 +305,11 @@ def create_web_app() -> FastAPI:
     @web_app.middleware("http")
     async def limit_submissions(request: Request, call_next: Any) -> Response:
         decision: RateLimitDecision | None = None
-        if request.method == "POST" and request.url.path == "/transcriptions":
+        if (
+            enforce_submission_limits
+            and request.method == "POST"
+            and request.url.path == "/transcriptions"
+        ):
             client_ip = request.client.host if request.client is not None else "unknown"
             try:
                 async with submission_lock:

@@ -14,7 +14,12 @@ uv run python -m music_transcription.benchmarks.m2_load \
   --base-url https://example--music-transcription-benchmark.modal.run
 ```
 
-Run it against a protected benchmark deployment:
+The protected benchmark endpoint is registered by `deployment.py`. It uses the
+same web settings and processing/GPU functions as the public endpoint, but skips
+the public demo quota because Modal rejects requests at its proxy unless they
+carry a valid proxy token.
+
+Run the benchmark against that protected endpoint:
 
 ```bash
 export BENCH_MODAL_KEY='...'
@@ -47,7 +52,7 @@ Git. Each report includes:
 - end-to-end completion latency;
 - terminal state and polling count;
 - server creation and update timestamps;
+- GPU type and container identity, including distinct-container counts per level;
 - preprocessing, model-load, and inference measurements returned by the app;
 - estimated inference-only L4 cost;
 - p50, p95, and maximum latency grouped by requested concurrency.
-

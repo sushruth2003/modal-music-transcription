@@ -185,3 +185,15 @@ def test_rate_limit_rejects_before_parsing_upload(monkeypatch) -> None:
     assert response.status_code == 429
     assert response.headers["retry-after"] == "60"
     assert response.json()["retry_after_seconds"] == 60
+
+
+def test_benchmark_app_bypasses_public_submission_limit(monkeypatch) -> None:
+    def unexpected_reservation(_client_ip: str):
+        raise AssertionError("benchmark requests must not reserve public quota")
+
+    monkeypatch.setattr(api, "reserve_submission", unexpected_reservation)
+    client = TestClient(api.create_web_app(enforce_submission_limits=False))
+
+    response = client.post("/transcriptions")
+
+    assert response.status_code == 422
