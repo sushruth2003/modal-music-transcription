@@ -39,6 +39,7 @@ def test_download_command_is_bounded_and_deterministic() -> None:
 
     assert "--no-playlist" in command
     assert command[command.index("--max-downloads") + 1] == "1"
+    assert command[command.index("--match-filter") + 1] == "!is_live & duration <=? 600"
     assert command[command.index("--audio-format") + 1] == "flac"
     assert command[command.index("--output") + 1] == "/artifacts/source.%(ext)s"
 

@@ -47,7 +47,10 @@ def download_command(source_url: str, destination: Path) -> list[str]:
         "--max-downloads",
         "1",
         "--match-filter",
-        f"!is_live & duration <= {MAX_AUDIO_SECONDS}",
+        # Instagram frequently omits duration from its pre-download metadata.
+        # `<=?` accepts an unknown value; ffprobe enforces the real limit after
+        # download and before any GPU work starts.
+        f"!is_live & duration <=? {MAX_AUDIO_SECONDS}",
         "--max-filesize",
         str(WEB_MAX_UPLOAD_BYTES),
         "--socket-timeout",
