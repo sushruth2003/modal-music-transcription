@@ -12,6 +12,7 @@ import modal
 from music_transcription.config import (
     APP_NAME,
     ARTIFACT_VOLUME_NAME,
+    BEAT_PACKAGE,
     FASTAPI_PACKAGE,
     FRONTEND_MOUNT_PATH,
     HUGGINGFACE_HUB_PACKAGE,
@@ -62,7 +63,7 @@ web_image = (
 model_image = (
     modal.Image.debian_slim(python_version=PYTHON_VERSION)
     .apt_install("ffmpeg", "libsndfile1")
-    .uv_pip_install(MODEL_PACKAGE)
+    .uv_pip_install(MODEL_PACKAGE, BEAT_PACKAGE)
     .env(
         {
             "HF_HUB_OFFLINE": "1",

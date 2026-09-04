@@ -19,11 +19,17 @@ from music_transcription.config import (
     MODEL_REVISION,
 )
 from music_transcription.resources import app, artifact_volume, model_image, model_volume
-from music_transcription.schemas import SerializedEvent
+from music_transcription.schemas import BeatGridDetection, SerializedEvent
 from music_transcription.storage import job_paths, mounted_artifact_path
 
 
-def _serialize_event(event: object) -> SerializedEvent:
+def corrected_event_time(seconds: float, onset_delay_seconds: float) -> float:
+    """Apply MuScriptor's measured global onset correction to an event time."""
+
+    return float(seconds) - onset_delay_seconds
+
+
+def _serialize_event(event: object, onset_delay_seconds: float = 0.0) -> SerializedEvent:
     """Convert MuScriptor's dataclass events into stable JSON records."""
 
     from muscriptor.events import NoteEndEvent, NoteStartEvent, ProgressEvent
@@ -34,13 +40,13 @@ def _serialize_event(event: object) -> SerializedEvent:
             "index": event.index,
             "pitch": event.pitch,
             "instrument": event.instrument,
-            "time": event.start_time,
+            "time": corrected_event_time(event.start_time, onset_delay_seconds),
         }
     if isinstance(event, NoteEndEvent):
         return {
             "type": "note_end",
             "index": event.start_event_index,
-            "time": event.end_time,
+            "time": corrected_event_time(event.end_time, onset_delay_seconds),
         }
     if isinstance(event, ProgressEvent):
         return {
@@ -103,11 +109,14 @@ class MuScriptorTranscriber:
         job_id: str,
         source_suffix: str,
         instruments: list[str] | None = None,
+        beat_detection: BeatGridDetection | None = None,
     ) -> dict[str, object]:
         """Read normalized audio and commit MIDI/events without returning bytes."""
 
+        import numpy as np
         import torch
         from muscriptor.events import NoteStartEvent
+        from muscriptor.utils.beats import BeatGrid
 
         paths = job_paths(job_id, source_suffix)
         artifact_volume.reload()
@@ -128,13 +137,25 @@ class MuScriptorTranscriber:
                 prelude_forcing=True,
             )
         )
-        midi_bytes = self.model.events_to_midi_bytes(iter(raw_events))
+        note_starts = [event for event in raw_events if isinstance(event, NoteStartEvent)]
+
+        beat_payload = beat_detection["grid"] if beat_detection is not None else None
+        beat_grid = None
+        if beat_payload is not None:
+            beat_grid = BeatGrid(
+                bpm=float(beat_payload["bpm"]),
+                beats_per_bar=beat_payload["beats_per_bar"],
+                first_downbeat=float(beat_payload["first_downbeat"]),
+                beats=np.asarray(beat_payload["beats"], dtype=float),
+            ).with_onset_delay([event.start_time for event in note_starts])
+
+        onset_delay_seconds = float(beat_grid.onset_delay or 0.0) if beat_grid is not None else 0.0
+        midi_bytes = self.model.events_to_midi_bytes(iter(raw_events), beat_grid=beat_grid)
         torch.cuda.synchronize()
 
         inference_seconds = time.perf_counter() - started
         audio_seconds = float(preprocessing["audio_seconds"])
-        events = [_serialize_event(event) for event in raw_events]
-        note_starts = [event for event in raw_events if isinstance(event, NoteStartEvent)]
+        events = [_serialize_event(event, onset_delay_seconds) for event in raw_events]
         detected_instruments = sorted({event.instrument for event in note_starts})
 
         mounted_artifact_path(paths["midi"]).write_bytes(midi_bytes)
@@ -147,6 +168,23 @@ class MuScriptorTranscriber:
             "instruments": detected_instruments,
             "audio_seconds": audio_seconds,
             "preprocessing": preprocessing["metrics"],
+            "timing": {
+                "beat_grid_detected": beat_payload is not None,
+                "beat_detection_seconds": (
+                    float(beat_detection["seconds"]) if beat_detection is not None else 0.0
+                ),
+                "bpm": float(beat_payload["bpm"]) if beat_payload is not None else None,
+                "beats_per_bar": (
+                    beat_payload["beats_per_bar"] if beat_payload is not None else None
+                ),
+                "first_downbeat_seconds": (
+                    float(beat_payload["first_downbeat"]) if beat_payload is not None else None
+                ),
+                "onset_delay_seconds": onset_delay_seconds,
+                "fallback_reason": (
+                    beat_detection["reason"] if beat_detection is not None else None
+                ),
+            },
             "model": {
                 "container_id": self.container_id,
                 "checkpoint_revision": MODEL_REVISION,

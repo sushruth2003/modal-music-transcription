@@ -124,6 +124,7 @@ def normalize_audio_file(source_path: Path, wav_path: Path) -> tuple[float, Prep
 def process_job(spec: JobSpec) -> dict[str, object]:
     """Run one durable CPU-to-GPU job using only Volume references."""
 
+    from music_transcription.beat_grid import BeatGridDetector
     from music_transcription.transcribe import MuScriptorTranscriber
 
     job_id = spec["job_id"]
@@ -147,11 +148,23 @@ def process_job(spec: JobSpec) -> dict[str, object]:
         )
         artifact_volume.commit()
 
+        beat_detection = BeatGridDetector().detect_artifact.remote(
+            job_id,
+            spec["source_suffix"],
+        )
+        preprocessing_record["beat_grid"] = beat_detection
+        mounted_artifact_path(paths["preprocessing"]).write_text(
+            json.dumps(preprocessing_record, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        artifact_volume.commit()
+
         update_job(job_id, "transcribing")
         result = MuScriptorTranscriber().transcribe_artifact.remote(
             job_id,
             spec["source_suffix"],
             spec["instruments"],
+            beat_detection,
         )
         if spec.get("generate_score", False):
             update_job(job_id, "rendering", result=result)

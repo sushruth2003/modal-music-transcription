@@ -11,7 +11,7 @@ import wave
 from importlib.metadata import version
 from pathlib import Path
 
-from music_transcription.config import AUDIO_SAMPLE_RATE, MODEL_PACKAGE
+from music_transcription.config import AUDIO_SAMPLE_RATE, BEAT_PACKAGE, MODEL_PACKAGE
 from music_transcription.resources import app, audio_image, model_image
 
 
@@ -57,17 +57,23 @@ def verify_audio_image() -> dict[str, str | float | int]:
 
 @app.function(image=model_image, cpu=2.0, memory=2048, timeout=10 * 60)
 def verify_model_image() -> dict[str, str | bool]:
-    """Prove that MuScriptor and its heavyweight dependencies import on CPU."""
+    """Prove that MuScriptor, Beat This!, and their dependencies import on CPU."""
 
     import torch
+    from beat_this.inference import Audio2Beats
     from muscriptor import TranscriptionModel
     from muscriptor.events import NoteEndEvent, NoteStartEvent, ProgressEvent
+    from muscriptor.utils.beats import BeatGrid
 
     expected_version = MODEL_PACKAGE.partition("==")[2]
+    expected_beat_version = BEAT_PACKAGE.partition("==")[2]
     installed_version = version("muscriptor")
+    installed_beat_version = version("beat-this")
     result: dict[str, str | bool] = {
         "muscriptor_version": installed_version,
+        "beat_this_version": installed_beat_version,
         "version_is_pinned": installed_version == expected_version,
+        "beat_this_version_is_pinned": installed_beat_version == expected_beat_version,
         # TorchVersion is a str subclass that requires torch when unpickled.
         # Convert all framework metadata to built-in values at the boundary.
         "torch_version": str(torch.__version__),
@@ -75,6 +81,8 @@ def verify_model_image() -> dict[str, str | bool]:
         "load_model_api": hasattr(TranscriptionModel, "load_model"),
         "transcribe_api": hasattr(TranscriptionModel, "transcribe"),
         "midi_api": hasattr(TranscriptionModel, "events_to_midi_bytes"),
+        "beat_detector_api": callable(Audio2Beats),
+        "beat_grid_onset_api": hasattr(BeatGrid, "with_onset_delay"),
         "load_model_signature": str(inspect.signature(TranscriptionModel.load_model)),
         "transcribe_signature": str(inspect.signature(TranscriptionModel.transcribe)),
         "midi_signature": str(inspect.signature(TranscriptionModel.events_to_midi_bytes)),

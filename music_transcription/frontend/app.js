@@ -197,7 +197,7 @@ function updateProcessing(jobState, progress, label) {
   showView("processing");
   els.processingName.textContent = label || {
     submitted: "Waiting for a worker",
-    preprocessing: "Normalizing the audio",
+    preprocessing: "Normalizing audio and detecting the beat grid",
     transcribing: "Reading notes on the L4",
     rendering: "Turning MIDI into sheet music",
     completed: "Artifacts ready",

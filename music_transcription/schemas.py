@@ -13,6 +13,19 @@ class PreprocessingMetrics(TypedDict):
     channels: int
 
 
+class SerializedBeatGrid(TypedDict):
+    bpm: float
+    beats_per_bar: int | None
+    first_downbeat: float
+    beats: list[float]
+
+
+class BeatGridDetection(TypedDict):
+    seconds: float
+    grid: SerializedBeatGrid | None
+    reason: str | None
+
+
 class SerializedEvent(TypedDict):
     type: Literal["note_start", "note_end", "progress"]
     index: NotRequired[int]

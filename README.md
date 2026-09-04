@@ -24,7 +24,8 @@ cp .env.example .env
 uv run modal secret create --from-dotenv .env huggingface-secret
 ```
 
-Materialize the pinned model weights once, then deploy the workers and web app:
+Materialize the pinned MuScriptor and Beat This! weights once, then deploy the
+workers and web app:
 
 ```bash
 uv run modal run -m music_transcription.models::download_model
@@ -83,8 +84,13 @@ browser / CLI
                     ffmpeg extracts audio → mono 16 kHz WAV
                                │ commit + path reference
                                ▼
+                    CPU Beat This! class
+                    constant tempo + meter + downbeat grid
+                               │ small JSON grid
+                               ▼
                     L4 MuScriptor GPU class
                     pinned 1.4B model loaded once per warm container
+                    grid corrects MIDI tempo, bars, and onset timing
                                │ commit
                                ▼
               Score only: CPU MuseScore Function
@@ -108,13 +114,25 @@ container handles up to 25 concurrent requests, keeping the quota update
 serialized while status and artifact reads remain concurrent.
 
 `process_job.spawn()` makes submission asynchronous: the HTTP request can end
-while a CPU worker extracts and normalizes the recording's audio, an L4 worker
-transcribes it, and an optional CPU worker renders notation. Those workers exchange
-Volume paths rather than media bytes. FFmpeg runs in the preprocessing image;
-MuseScore runs in the notation image. Neither workload occupies an L4. The model
-checkpoint lives on a separate read-only Volume and is loaded by `@modal.enter`
-once for each warm GPU container. GPU inference still has `min_containers=0` and
+while a CPU worker extracts and normalizes the recording's audio, a second CPU
+worker detects its beat grid, an L4 worker transcribes it, and an optional CPU
+worker renders notation. Those workers exchange Volume paths rather than media
+bytes. FFmpeg and Beat This! do not occupy an L4; MuseScore also runs in its own
+CPU image. MuScriptor's checkpoint and the exact Beat This! `final0` checkpoint
+live on a separate read-only Volume. Each model is loaded by `@modal.enter` once
+per warm worker. GPU inference still has `min_containers=0` and
 `max_containers=4`, so it scales to zero and has a bounded spend rate.
+
+Beat detection is best-effort. Recordings that are too short or do not fit a
+steady tempo continue through transcription with MuScriptor's placeholder MIDI
+tempo. When a grid is usable, the exported MIDI receives its measured tempo and
+time signature, bar lines are aligned to the first downbeat, and MuScriptor's
+small global onset lag is corrected in both MIDI and browser events. The timing
+summary and any fallback reason are recorded in `metrics.json`.
+
+See [Beat-grid correction](BEAT_GRID.md) for the validation thresholds,
+onset and bar-offset semantics, checkpoint lifecycle, fallback policy, and
+deployment steps.
 
 The durable artifacts for each job are:
 
@@ -134,10 +152,11 @@ jobs/{job_id}/
 | Component | Concrete job |
 |---|---|
 | FastAPI ASGI Function | Accept uploads, return job handles, and serve status/artifacts |
-| CPU `process_job` Function | Extract and normalize audio, then coordinate its GPU call |
+| CPU `process_job` Function | Extract and normalize audio, then coordinate the workers |
+| CPU Beat This! class | Keep the beat tracker warm and detect tempo, meter, and downbeats |
 | L4 GPU class | Keep MuScriptor resident while warm and run inference |
 | CPU score Function | Import MIDI into MuseScore and export PDF plus MusicXML |
-| Model Volume | Persist the static, pinned checkpoint independently of containers |
+| Model Volume | Persist both static, pinned checkpoints independently of containers |
 | Artifact Volume | Persist source audio and generated files across every stage |
 | Dict | Hold small status records, timestamps, errors, and result summaries |
 | Rate-limit Dict | Enforce rolling per-IP and global daily submission quotas |

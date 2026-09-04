@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import io
 import json
 
 from music_transcription import models
@@ -49,3 +51,35 @@ def test_ready_metadata_rejects_incomplete_snapshot(tmp_path, monkeypatch) -> No
     )
 
     assert models._ready_metadata() is None
+
+
+def configure_beat_checkpoint(tmp_path, monkeypatch, payload: bytes = b"beat") -> None:
+    monkeypatch.setattr(models, "BEAT_CHECKPOINT_PATH", tmp_path / "beat_this-final0.ckpt")
+    monkeypatch.setattr(models, "BEAT_CHECKPOINT_BYTES", len(payload))
+    monkeypatch.setattr(models, "BEAT_CHECKPOINT_SHA256", hashlib.sha256(payload).hexdigest())
+
+
+def test_beat_checkpoint_ready_validates_size_and_hash(tmp_path, monkeypatch) -> None:
+    payload = b"beat"
+    configure_beat_checkpoint(tmp_path, monkeypatch, payload)
+    models.BEAT_CHECKPOINT_PATH.write_bytes(payload)
+
+    assert models._beat_checkpoint_ready()
+
+    models.BEAT_CHECKPOINT_PATH.write_bytes(b"bent")
+    assert not models._beat_checkpoint_ready()
+
+
+def test_download_beat_checkpoint_is_verified_and_installed(tmp_path, monkeypatch) -> None:
+    payload = b"pinned beat checkpoint"
+    configure_beat_checkpoint(tmp_path, monkeypatch, payload)
+    monkeypatch.setattr(
+        models.urllib.request,
+        "urlopen",
+        lambda *_args, **_kwargs: io.BytesIO(payload),
+    )
+
+    models._download_beat_checkpoint()
+
+    assert models.BEAT_CHECKPOINT_PATH.read_bytes() == payload
+    assert not models.BEAT_CHECKPOINT_PATH.with_suffix(".ckpt.partial").exists()

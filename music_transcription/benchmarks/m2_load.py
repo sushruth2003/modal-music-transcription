@@ -153,6 +153,7 @@ def _result_metrics(payload: dict[str, Any], end_to_end_seconds: float) -> dict[
     paths = {
         "audio_seconds": ("result", "audio_seconds"),
         "preprocessing_seconds": ("result", "preprocessing", "seconds"),
+        "beat_detection_seconds": ("result", "timing", "beat_detection_seconds"),
         "model_load_seconds": ("result", "model", "load_seconds"),
         "inference_seconds": ("result", "inference", "seconds"),
         "real_time_factor": ("result", "inference", "real_time_factor"),

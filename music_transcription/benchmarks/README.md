@@ -53,6 +53,6 @@ Git. Each report includes:
 - terminal state and polling count;
 - server creation and update timestamps;
 - GPU type and container identity, including distinct-container counts per level;
-- preprocessing, model-load, and inference measurements returned by the app;
+- preprocessing, beat-detection, model-load, and inference measurements returned by the app;
 - estimated inference-only L4 cost;
 - p50, p95, and maximum latency grouped by requested concurrency.

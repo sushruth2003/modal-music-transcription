@@ -8,12 +8,22 @@ PYTHON_VERSION = "3.12"
 MODEL_REPO_ID = "MuScriptor/muscriptor-large"
 MODEL_REVISION = "8809fdfbed2affa7ade94a7059e746e3880720e7"
 MODEL_PACKAGE = "muscriptor==0.3.0"
+BEAT_PACKAGE = "beat-this==1.1.0"
 MODEL_VOLUME_NAME = "music-transcription-models"
 MODEL_MOUNT_PATH = Path("/models")
 MODEL_SNAPSHOT_PATH = MODEL_MOUNT_PATH / "muscriptor-large" / MODEL_REVISION
 MODEL_CHECKPOINT_PATH = MODEL_SNAPSHOT_PATH / "model.safetensors"
 MODEL_CONFIG_PATH = MODEL_SNAPSHOT_PATH / "config.json"
 MODEL_READY_PATH = MODEL_SNAPSHOT_PATH / "READY.json"
+
+# Beat This! final0 is the checkpoint used by muscriptor==0.3.0 for beat-grid
+# detection. Keep it beside MuScriptor's weights so inference never downloads
+# model data at runtime.
+BEAT_CHECKPOINT_NAME = "final0"
+BEAT_CHECKPOINT_URL = "https://cloud.cp.jku.at/public.php/dav/files/7ik4RrBKTS273gp/final0.ckpt"
+BEAT_CHECKPOINT_SHA256 = "8c328b45f59d8dd3dff219253ff6a8d6482be57d0133a29140e2febbf8eb8331"
+BEAT_CHECKPOINT_BYTES = 81_058_141
+BEAT_CHECKPOINT_PATH = MODEL_MOUNT_PATH / "beat-this" / "beat_this-final0.ckpt"
 
 ARTIFACT_VOLUME_NAME = "music-transcription-artifacts"
 ARTIFACT_MOUNT_PATH = Path("/artifacts")
@@ -26,6 +36,9 @@ HUGGINGFACE_HUB_PACKAGE = "huggingface-hub==1.29.0"
 GPU_TYPE = "L4"
 GPU_MAX_CONTAINERS = 4
 GPU_SCALEDOWN_WINDOW_SECONDS = 120
+
+BEAT_MAX_CONTAINERS = GPU_MAX_CONTAINERS
+BEAT_SCALEDOWN_WINDOW_SECONDS = GPU_SCALEDOWN_WINDOW_SECONDS
 
 AUDIO_SAMPLE_RATE = 16_000
 MAX_AUDIO_SECONDS = 10 * 60

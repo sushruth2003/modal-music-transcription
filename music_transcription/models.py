@@ -1,12 +1,21 @@
-"""One-time, idempotent materialization of MuScriptor Large weights."""
+"""One-time, idempotent materialization of transcription model weights."""
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
+import shutil
+import urllib.request
 from datetime import UTC, datetime
+from pathlib import Path
 
 from music_transcription.config import (
+    BEAT_CHECKPOINT_BYTES,
+    BEAT_CHECKPOINT_NAME,
+    BEAT_CHECKPOINT_PATH,
+    BEAT_CHECKPOINT_SHA256,
+    BEAT_CHECKPOINT_URL,
     MIN_EXPECTED_CHECKPOINT_BYTES,
     MODEL_CHECKPOINT_PATH,
     MODEL_CONFIG_PATH,
@@ -24,7 +33,55 @@ from music_transcription.resources import (
 )
 
 
-def _ready_metadata() -> dict[str, str | int] | None:
+def _sha256_path(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as source:
+        while chunk := source.read(1024 * 1024):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _beat_checkpoint_ready() -> bool:
+    """Validate the exact Beat This! checkpoint pinned by this deployment."""
+
+    return (
+        BEAT_CHECKPOINT_PATH.is_file()
+        and BEAT_CHECKPOINT_PATH.stat().st_size == BEAT_CHECKPOINT_BYTES
+        and _sha256_path(BEAT_CHECKPOINT_PATH) == BEAT_CHECKPOINT_SHA256
+    )
+
+
+def _download_beat_checkpoint() -> None:
+    """Stream and atomically install the pinned Beat This! checkpoint."""
+
+    BEAT_CHECKPOINT_PATH.parent.mkdir(parents=True, exist_ok=True)
+    partial_path = BEAT_CHECKPOINT_PATH.with_suffix(".ckpt.partial")
+    try:
+        with (
+            urllib.request.urlopen(BEAT_CHECKPOINT_URL, timeout=10 * 60) as response,
+            partial_path.open("wb") as destination,
+        ):
+            shutil.copyfileobj(response, destination, length=1024 * 1024)
+
+        checkpoint_bytes = partial_path.stat().st_size
+        if checkpoint_bytes != BEAT_CHECKPOINT_BYTES:
+            raise RuntimeError(
+                f"Beat checkpoint is {checkpoint_bytes:,} bytes; "
+                f"expected exactly {BEAT_CHECKPOINT_BYTES:,}"
+            )
+
+        checkpoint_sha256 = _sha256_path(partial_path)
+        if checkpoint_sha256 != BEAT_CHECKPOINT_SHA256:
+            raise RuntimeError(
+                "Beat checkpoint SHA-256 mismatch: "
+                f"received {checkpoint_sha256}, expected {BEAT_CHECKPOINT_SHA256}"
+            )
+        partial_path.replace(BEAT_CHECKPOINT_PATH)
+    finally:
+        partial_path.unlink(missing_ok=True)
+
+
+def _ready_metadata() -> dict[str, object] | None:
     """Return validated marker metadata, or None for an incomplete snapshot."""
 
     if not MODEL_READY_PATH.is_file():
@@ -54,8 +111,8 @@ def _ready_metadata() -> dict[str, str | int] | None:
     volumes={str(MODEL_MOUNT_PATH): model_volume},
     secrets=[huggingface_secret],
 )
-def download_model() -> dict[str, str | int | bool]:
-    """Download the pinned checkpoint once and commit it to the model Volume."""
+def download_model() -> dict[str, object]:
+    """Download the pinned MuScriptor and Beat This! checkpoints once."""
 
     from huggingface_hub import snapshot_download
 
@@ -64,40 +121,69 @@ def download_model() -> dict[str, str | int | bool]:
     model_volume.reload()
 
     existing = _ready_metadata()
-    if existing is not None:
-        result = {**existing, "downloaded": False}
+    beat_metadata = {
+        "name": BEAT_CHECKPOINT_NAME,
+        "bytes": BEAT_CHECKPOINT_BYTES,
+        "sha256": BEAT_CHECKPOINT_SHA256,
+    }
+    beat_ready = _beat_checkpoint_ready()
+    if existing is not None and beat_ready and existing.get("beat_checkpoint") == beat_metadata:
+        result = {
+            **existing,
+            "downloaded": False,
+            "model_downloaded": False,
+            "beat_checkpoint_downloaded": False,
+        }
         print(json.dumps(result, sort_keys=True))
         return result
 
-    MODEL_SNAPSHOT_PATH.mkdir(parents=True, exist_ok=True)
-    snapshot_download(
-        repo_id=MODEL_REPO_ID,
-        revision=MODEL_REVISION,
-        local_dir=str(MODEL_SNAPSHOT_PATH),
-        token=os.environ["HF_TOKEN"],
-    )
-
-    if not MODEL_CHECKPOINT_PATH.is_file() or not MODEL_CONFIG_PATH.is_file():
-        raise RuntimeError("Downloaded snapshot is missing model.safetensors or config.json")
-
-    checkpoint_bytes = MODEL_CHECKPOINT_PATH.stat().st_size
-    if checkpoint_bytes < MIN_EXPECTED_CHECKPOINT_BYTES:
-        raise RuntimeError(
-            f"Checkpoint is unexpectedly small: {checkpoint_bytes:,} bytes; "
-            f"expected at least {MIN_EXPECTED_CHECKPOINT_BYTES:,}"
+    model_downloaded = existing is None
+    if model_downloaded:
+        MODEL_SNAPSHOT_PATH.mkdir(parents=True, exist_ok=True)
+        snapshot_download(
+            repo_id=MODEL_REPO_ID,
+            revision=MODEL_REVISION,
+            local_dir=str(MODEL_SNAPSHOT_PATH),
+            token=os.environ["HF_TOKEN"],
         )
 
-    metadata: dict[str, str | int] = {
-        "repo_id": MODEL_REPO_ID,
-        "revision": MODEL_REVISION,
-        "checkpoint_bytes": checkpoint_bytes,
-        "completed_at": datetime.now(UTC).isoformat(),
-    }
+        if not MODEL_CHECKPOINT_PATH.is_file() or not MODEL_CONFIG_PATH.is_file():
+            raise RuntimeError("Downloaded snapshot is missing model.safetensors or config.json")
+
+        checkpoint_bytes = MODEL_CHECKPOINT_PATH.stat().st_size
+        if checkpoint_bytes < MIN_EXPECTED_CHECKPOINT_BYTES:
+            raise RuntimeError(
+                f"Checkpoint is unexpectedly small: {checkpoint_bytes:,} bytes; "
+                f"expected at least {MIN_EXPECTED_CHECKPOINT_BYTES:,}"
+            )
+        metadata: dict[str, object] = {
+            "repo_id": MODEL_REPO_ID,
+            "revision": MODEL_REVISION,
+            "checkpoint_bytes": checkpoint_bytes,
+        }
+    else:
+        metadata = dict(existing)
+
+    beat_downloaded = not beat_ready
+    if beat_downloaded:
+        _download_beat_checkpoint()
+
+    metadata.update(
+        {
+            "completed_at": datetime.now(UTC).isoformat(),
+            "beat_checkpoint": beat_metadata,
+        }
+    )
     MODEL_READY_PATH.write_text(
         json.dumps(metadata, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
     model_volume.commit()
-    result = {**metadata, "downloaded": True}
+    result = {
+        **metadata,
+        "downloaded": model_downloaded or beat_downloaded,
+        "model_downloaded": model_downloaded,
+        "beat_checkpoint_downloaded": beat_downloaded,
+    }
     print(json.dumps(result, sort_keys=True))
     return result
