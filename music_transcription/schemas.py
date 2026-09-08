@@ -74,5 +74,9 @@ class JobRecord(TypedDict):
     paths: JobPaths
     created_at: str
     updated_at: str
+    score_state: NotRequired[str]
+    score_error: NotRequired[str | None]
+    score_attempts: NotRequired[int]
+    score_requested_at: NotRequired[float]
     error: NotRequired[str]
     result: NotRequired[dict[str, object]]

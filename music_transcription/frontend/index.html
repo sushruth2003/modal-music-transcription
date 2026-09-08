@@ -9,7 +9,7 @@
     />
     <title>Auto Transcribe</title>
     <link rel="stylesheet" href="/styles.css?v=20260904-3" />
-    <script src="/app.js?v=20260904-6" defer></script>
+    <script src="/app.js?v=20260906-3" defer></script>
   </head>
   <body>
     <div class="shell">
@@ -63,14 +63,14 @@
             </label>
 
             <div class="field instrument-field">
-              <span>Expected instruments <small>optional</small></span>
+              <span>Keep instruments <small>optional</small></span>
               <details id="instrument-picker" class="instrument-picker">
                 <summary>
                   <span id="instrument-summary">Auto-detect instruments</span>
                   <small>Choose</small>
                 </summary>
                 <div class="instrument-menu">
-                  <p>Select only instruments you know are present. This restricts what the model can emit.</p>
+                  <p>Only selected instruments are kept from the predicted tracks. Leave empty to keep all instruments.</p>
                   <div id="instrument-options" class="instrument-options" aria-live="polite">
                     <p>Loading instrument choices…</p>
                   </div>
@@ -148,6 +148,7 @@
                   <h2 id="result-name">Untitled recording</h2>
                 </div>
                 <div class="result-actions">
+                  <button id="score-create" class="download-button score-action" type="button" hidden>Create PDF score</button>
                   <a id="score-view" class="download-button score-action" href="#" target="_blank" hidden>View score</a>
                   <a id="midi-download" class="download-button" href="#" download>
                     <svg viewBox="0 0 20 20" aria-hidden="true">
@@ -215,7 +216,7 @@
       </main>
 
       <footer>
-        <span>Transcription model: MuScriptor Large · Runs on Modal</span>
+        <span>Transcription model: YourMT3+ MoE · Runs on Modal</span>
         <span class="footer-links"><a href="/how-it-works">How it works</a><a href="/docs">API docs</a></span>
       </footer>
     </div>

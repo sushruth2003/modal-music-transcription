@@ -1,5 +1,12 @@
 # M2 benchmark runner
 
+For audio-to-MIDI accuracy experiments, see [Quality evaluation](QUALITY.md).
+For the 32-recording study and alternative model architectures, see
+[Quality suite](QUALITY_SUITE.md), [Architecture study](ARCHITECTURES.md), and
+[architecture results](ARCHITECTURE_RESULTS.md). The HTML reports include matched
+subsets, uncertainty intervals, audio previews and downloadable MIDI.
+The load runner below measures serving performance, not musical accuracy.
+
 This directory contains development tooling, not code used by the deployed web,
 CPU-processing, or GPU-inference functions.
 

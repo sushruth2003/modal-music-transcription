@@ -118,3 +118,60 @@ SCORE_RENDER_TIMEOUT_SECONDS = 5 * 60
 L4_PRICE_PER_SECOND_USD = 0.000222
 
 MIN_EXPECTED_CHECKPOINT_BYTES = 5_000_000_000
+
+# Production YourMT3+ MoE identity; legacy MuScriptor pins remain for benchmarks/rollback.
+YOURMT3_REPO_ID = "mimbres/YourMT3"
+YOURMT3_REVISION = "5e66c1ea173a8186e0d20432b841d3180cc015b5"
+YOURMT3_EXPERIMENT = "mc13_256_g4_all_v7_mt3f_sqr_rms_moe_wf4_n8k2_silu_rope_rp_b36_nops"
+YOURMT3_CHECKPOINT_RELATIVE = f"amt/logs/2024/{YOURMT3_EXPERIMENT}/checkpoints/last.ckpt"
+YOURMT3_SNAPSHOT_PATH = MODEL_MOUNT_PATH / "yourmt3-moe" / YOURMT3_REVISION
+YOURMT3_CHECKPOINT_PATH = YOURMT3_SNAPSHOT_PATH / YOURMT3_CHECKPOINT_RELATIVE
+YOURMT3_READY_PATH = YOURMT3_SNAPSHOT_PATH / "READY.json"
+YOURMT3_CHECKPOINT_BYTES = 561_544_628
+YOURMT3_CHECKPOINT_SHA256 = "ae38e415c79efd5592dcb9b658cdb99ddb11d4c4e1eaa364cab04a052473fc25"
+YOURMT3_ARGS = [
+    f"{YOURMT3_EXPERIMENT}@last.ckpt",
+    "-p",
+    "2024",
+    "-pr",
+    "32",
+    "-tk",
+    "mc13_full_plus_256",
+    "-dec",
+    "multi-t5",
+    "-nl",
+    "26",
+    "-enc",
+    "perceiver-tf",
+    "-sqr",
+    "1",
+    "-ff",
+    "moe",
+    "-wf",
+    "4",
+    "-nmoe",
+    "8",
+    "-kmoe",
+    "2",
+    "-act",
+    "silu",
+    "-epe",
+    "rope",
+    "-rp",
+    "1",
+    "-ac",
+    "spec",
+    "-hop",
+    "300",
+    "-atc",
+    "1",
+]
+INSTRUMENT_GROUPS = MUSCRIPTOR_INSTRUMENT_GROUPS + (
+    ("Singing", ("singing_voice", "singing_voice_chorus")),
+)
+INSTRUMENT_NAMES = tuple(name for _, names in INSTRUMENT_GROUPS for name in names)
+
+SCORE_ENGINE_VERSION = "4.7.4"
+SCORE_ENGINE_URL = "https://github.com/musescore/MuseScore/releases/download/v4.7.4/MuseScore-Studio-4.7.4.260706075-x86_64.AppImage"
+SCORE_ENGINE_SHA256 = "9233ed1b87d3e6b45722278f3c286dcd41e83da778bd0f80a1dd04949696ad93"
+SCORE_ENGINE_COMMAND = "/opt/musescore/AppRun"

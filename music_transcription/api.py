@@ -7,6 +7,7 @@ import hashlib
 import json
 import mimetypes
 import tempfile
+import time
 from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -22,10 +23,11 @@ from fastapi.staticfiles import StaticFiles
 from music_transcription.config import (
     ARTIFACT_MOUNT_PATH,
     FRONTEND_MOUNT_PATH,
+    INSTRUMENT_GROUPS,
     L4_PRICE_PER_SECOND_USD,
-    MUSCRIPTOR_INSTRUMENT_GROUPS,
     PUBLIC_BETA_JOB_RESERVATION_USD,
     PUBLIC_BETA_MONTHLY_BUDGET_USD,
+    SCORE_RENDER_TIMEOUT_SECONDS,
     SUPPORTED_VIDEO_SUFFIXES,
     WEB_MAX_CONCURRENT_INPUTS,
     WEB_MAX_CONTAINERS,
@@ -338,7 +340,7 @@ def parse_event_stream(payload: bytes) -> list[SerializedEvent]:
 
 
 def pair_note_events(events: Iterable[SerializedEvent]) -> list[dict[str, object]]:
-    """Pair MuScriptor start/end events into browser-friendly piano-roll notes."""
+    """Pair stable start/end events into browser-friendly piano-roll notes."""
 
     starts: dict[int, dict[str, object]] = {}
     notes: list[dict[str, object]] = []
@@ -369,6 +371,13 @@ def pair_note_events(events: Iterable[SerializedEvent]) -> list[dict[str, object
                 continue
             notes.append({**note, "end": float(end)})
     return sorted(notes, key=lambda note: (float(note["start"]), int(note["pitch"])))
+
+
+def spawn_score_job(job_id: str, source_suffix: str) -> str:
+    from music_transcription.config import APP_NAME
+
+    worker = modal.Function.from_name(APP_NAME, "create_score_for_job")
+    return worker.spawn(job_id, source_suffix).object_id
 
 
 def public_job_record(record: JobRecord) -> dict[str, object]:
@@ -403,7 +412,15 @@ def public_job_record(record: JobRecord) -> dict[str, object]:
             "midi": f"/transcriptions/{job_id}/midi",
         },
     }
-    if record.get("generate_score"):
+    score_state = record.get("score_state")
+    response["score_state"] = score_state
+    if record.get("score_error"):
+        response["score_error"] = record["score_error"]
+    if (
+        record.get("generate_score")
+        and not result.get("score", {}).get("skipped_reason")
+        and score_state not in {"pending", "rendering", "failed", "skipped"}
+    ):
         links = response["links"]
         assert isinstance(links, dict)
         links["score_pdf"] = f"/transcriptions/{job_id}/score.pdf"
@@ -537,7 +554,7 @@ def create_web_app(*, enforce_submission_limits: bool = True) -> FastAPI:
                         for name in names
                     ],
                 }
-                for group, names in MUSCRIPTOR_INSTRUMENT_GROUPS
+                for group, names in INSTRUMENT_GROUPS
             ]
         }
 
@@ -658,6 +675,61 @@ def create_web_app(*, enforce_submission_limits: bool = True) -> FastAPI:
                 )
             },
         )
+
+    @web_app.post("/transcriptions/{job_id}/score")
+    async def request_score(job_id: str) -> JSONResponse:
+        # One public web container serializes admission. A job is eligible only
+        # after its already-budgeted transcription completes; cap retries per job.
+        async with submission_lock:
+            record = await completed_job(job_id)
+            result = record.get("result", {})
+            existing = result.get("score", {})
+            if existing.get("pdf_bytes") or existing.get("skipped_reason"):
+                return JSONResponse(public_job_record(record))
+            if result.get("note_count") == 0:
+                raise HTTPException(
+                    status_code=422, detail="No notes were detected to put in a score"
+                )
+            active = record.get("score_state") in {"pending", "rendering"}
+            age = time.time() - record.get("score_requested_at", 0)
+            if active and age < SCORE_RENDER_TIMEOUT_SECONDS + 180:
+                return JSONResponse(
+                    public_job_record(record), status_code=202, headers={"Retry-After": "2"}
+                )
+            attempts = record.get("score_attempts", 0)
+            if attempts >= 3:
+                raise HTTPException(
+                    status_code=429,
+                    detail="This job has reached its PDF retry limit. Download the MIDI to continue.",
+                )
+            record = await asyncio.to_thread(
+                update_job,
+                job_id,
+                "completed",
+                generate_score=True,
+                score_state="pending",
+                score_requested_at=time.time(),
+                score_attempts=attempts + 1,
+                score_error=None,
+            )
+            try:
+                await asyncio.to_thread(
+                    spawn_score_job, job_id, Path(record["paths"]["source"]).suffix
+                )
+            except Exception as error:
+                await asyncio.to_thread(
+                    update_job,
+                    job_id,
+                    "completed",
+                    score_state="failed",
+                    score_error="The PDF worker could not start. Please retry.",
+                )
+                raise HTTPException(
+                    status_code=503, detail="The PDF worker could not start. Please retry."
+                ) from error
+            return JSONResponse(
+                public_job_record(record), status_code=202, headers={"Retry-After": "2"}
+            )
 
     @web_app.get("/transcriptions/{job_id}/score.pdf")
     async def transcription_score_pdf(job_id: str) -> Response:

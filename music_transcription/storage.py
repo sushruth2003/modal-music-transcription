@@ -11,7 +11,7 @@ from uuid import uuid4
 
 from music_transcription.config import (
     ARTIFACT_MOUNT_PATH,
-    MUSCRIPTOR_INSTRUMENT_NAMES,
+    INSTRUMENT_NAMES,
     SUPPORTED_SOURCE_SUFFIXES,
 )
 from music_transcription.resources import artifact_volume, job_states
@@ -57,7 +57,7 @@ def validate_instrument_names(instruments: list[str] | None) -> list[str] | None
 
     if not instruments:
         return None
-    allowed = frozenset(MUSCRIPTOR_INSTRUMENT_NAMES)
+    allowed = frozenset(INSTRUMENT_NAMES)
     unknown = sorted(set(instruments) - allowed)
     if unknown:
         raise ValueError(f"Unsupported instrument selection: {', '.join(unknown)}")
