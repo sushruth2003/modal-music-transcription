@@ -187,3 +187,60 @@ def download_model() -> dict[str, object]:
     }
     print(json.dumps(result, sort_keys=True))
     return result
+
+
+@app.function(
+    image=download_image,
+    cpu=2,
+    memory=4096,
+    timeout=1800,
+    max_containers=1,
+    volumes={str(MODEL_MOUNT_PATH): model_volume},
+)
+def download_yourmt3() -> dict[str, object]:
+    """Materialize and hash-check the evaluated MoE checkpoint, plus beat weights."""
+    from huggingface_hub import snapshot_download
+
+    from music_transcription.config import (
+        YOURMT3_CHECKPOINT_BYTES,
+        YOURMT3_CHECKPOINT_PATH,
+        YOURMT3_CHECKPOINT_RELATIVE,
+        YOURMT3_CHECKPOINT_SHA256,
+        YOURMT3_READY_PATH,
+        YOURMT3_REPO_ID,
+        YOURMT3_REVISION,
+        YOURMT3_SNAPSHOT_PATH,
+    )
+
+    model_volume.reload()
+    ready = (
+        YOURMT3_CHECKPOINT_PATH.is_file()
+        and YOURMT3_CHECKPOINT_PATH.stat().st_size == YOURMT3_CHECKPOINT_BYTES
+        and _sha256_path(YOURMT3_CHECKPOINT_PATH) == YOURMT3_CHECKPOINT_SHA256
+    )
+    if not ready:
+        snapshot_download(
+            YOURMT3_REPO_ID,
+            repo_type="space",
+            revision=YOURMT3_REVISION,
+            local_dir=str(YOURMT3_SNAPSHOT_PATH),
+            allow_patterns=[YOURMT3_CHECKPOINT_RELATIVE],
+            force_download=True,
+        )
+    if (
+        YOURMT3_CHECKPOINT_PATH.stat().st_size != YOURMT3_CHECKPOINT_BYTES
+        or _sha256_path(YOURMT3_CHECKPOINT_PATH) != YOURMT3_CHECKPOINT_SHA256
+    ):
+        raise RuntimeError("YourMT3 checkpoint integrity check failed")
+    if not _beat_checkpoint_ready():
+        _download_beat_checkpoint()
+    metadata = {
+        "repo_id": YOURMT3_REPO_ID,
+        "revision": YOURMT3_REVISION,
+        "checkpoint_sha256": YOURMT3_CHECKPOINT_SHA256,
+        "checkpoint_bytes": YOURMT3_CHECKPOINT_BYTES,
+        "completed_at": datetime.now(UTC).isoformat(),
+    }
+    YOURMT3_READY_PATH.write_text(json.dumps(metadata, indent=2) + "\n")
+    model_volume.commit()
+    return {**metadata, "downloaded": not ready}

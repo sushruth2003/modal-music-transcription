@@ -52,13 +52,13 @@
             <span>03</span>
             <p class="section-kicker">Listen</p>
             <h2>Decode notes on a GPU</h2>
-            <p>MuScriptor Large runs on an NVIDIA L4 and predicts note starts, note ends, pitch, and instrument. Optional instrument hints narrow its choices.</p>
+            <p>YourMT3+ MoE runs on an NVIDIA L4 and predicts note starts, note ends, pitch, and instrument. Optional instrument selection filters the predicted tracks.</p>
           </article>
           <article>
             <span>04</span>
-            <p class="section-kicker">Correct time</p>
-            <h2>Align notes to the beat grid</h2>
-            <p>A conservative timing pass tests whether the beat grid is trustworthy, then nudges nearby onsets and note lengths onto sensible subdivisions without flattening expressive timing.</p>
+            <p class="section-kicker">Keep the phrasing</p>
+            <h2>Preserve note timing</h2>
+            <p>The MIDI keeps the predicted note timing, including expressive phrasing. Beat detection adds tempo and meter information; it does not snap notes to a grid.</p>
           </article>
           <article>
             <span>05</span>
@@ -94,7 +94,7 @@
       </main>
 
       <footer>
-        <span>Transcription model: MuScriptor Large · Runs on Modal</span>
+        <span>Transcription model: YourMT3+ MoE · Runs on Modal</span>
         <span class="footer-links"><a href="/">Transcribe</a><a href="/docs">API docs</a></span>
       </footer>
     </div>

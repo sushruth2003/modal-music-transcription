@@ -18,6 +18,7 @@ const els = {
   jobError: document.querySelector("#job-error"),
   resultName: document.querySelector("#result-name"),
   midiDownload: document.querySelector("#midi-download"),
+  scoreCreate: document.querySelector("#score-create"),
   scoreView: document.querySelector("#score-view"),
   scoreHelp: document.querySelector("#score-help"),
   audio: document.querySelector("#source-audio"),
@@ -261,7 +262,9 @@ async function loadResult(job) {
   els.midiDownload.href = job.links.midi;
   const hasScore = Boolean(job.links.score_pdf);
   els.scoreView.hidden = !hasScore;
-  els.scoreHelp.hidden = !hasScore;
+  const skippedScore = job.result?.score?.skipped_reason;
+  els.scoreHelp.hidden = !hasScore && !skippedScore;
+  els.scoreHelp.textContent = skippedScore || "PDF notation is an automatic draft. Review rhythm, spelling, and layout before sharing.";
   if (hasScore) {
     els.scoreView.href = job.links.score_pdf;
   }
@@ -272,10 +275,73 @@ async function loadResult(job) {
   els.metricInference.textContent = Number.isFinite(seconds) ? `${seconds.toFixed(2)} s` : "—";
   const cost = job.result?.inference?.estimated_gpu_cost_usd;
   els.metricCost.textContent = Number.isFinite(cost) ? `$${cost.toFixed(4)}` : "—";
+  updateScoreControls(job);
   buildInstrumentFilters(roll.instruments);
+  if (["pending", "rendering"].includes(job.score_state)) {
+    pollScore(job.job_id).catch(error => {
+      if (state.jobId !== job.job_id) return;
+      els.scoreHelp.hidden = false;
+      els.scoreHelp.textContent = error.message;
+      els.scoreCreate.disabled = false;
+    });
+  }
   showView("result");
   resizeCanvas();
   renderRoll(0);
+}
+
+function updateScoreControls(job) {
+  const busy = ["pending", "rendering"].includes(job.score_state);
+  const hasScore = Boolean(job.links.score_pdf);
+  const empty = job.result?.note_count === 0;
+  els.scoreCreate.hidden = hasScore || empty;
+  els.scoreCreate.disabled = busy;
+  els.scoreCreate.textContent = busy ? "Creating PDF…" : job.score_state === "failed" ? "Retry PDF score" : "Create PDF score";
+  if (job.score_error) {
+    els.scoreHelp.hidden = false;
+    els.scoreHelp.textContent = job.score_error;
+  }
+}
+
+async function pollScore(jobId) {
+  const deadline = Date.now() + 8 * 60 * 1000;
+  while (state.jobId === jobId && Date.now() < deadline) {
+    const job = await getJson(`/transcriptions/${jobId}`);
+    if (state.jobId !== jobId) return;
+    state.job = job;
+    updateScoreControls(job);
+    if (!["pending", "rendering"].includes(job.score_state)) {
+      els.scoreView.hidden = !job.links.score_pdf;
+      if (job.links.score_pdf) els.scoreView.href = job.links.score_pdf;
+      const explanation = job.score_error || job.result?.score?.skipped_reason;
+      els.scoreHelp.hidden = !explanation && !job.links.score_pdf;
+      els.scoreHelp.textContent = explanation || "PDF notation is an automatic draft. Review rhythm, spelling, and layout before sharing.";
+      return;
+    }
+    await new Promise(resolve => setTimeout(resolve, 2000));
+  }
+  if (state.jobId === jobId) {
+    els.scoreCreate.disabled = false;
+    els.scoreCreate.textContent = "Check PDF score";
+  }
+}
+
+async function requestScore() {
+  const jobId = state.jobId;
+  els.scoreCreate.disabled = true;
+  els.scoreCreate.textContent = "Creating PDF…";
+  try {
+    const response = await fetch(`/transcriptions/${jobId}/score`, {method: "POST"});
+    const payload = await response.json();
+    if (!response.ok) throw new Error(readableError(payload, "Could not create the PDF score"));
+    await pollScore(jobId);
+  } catch (error) {
+    if (state.jobId !== jobId) return;
+    els.scoreCreate.disabled = false;
+    els.scoreCreate.textContent = "Retry PDF score";
+    els.scoreHelp.hidden = false;
+    els.scoreHelp.textContent = error.message;
+  }
 }
 
 function buildInstrumentFilters(instruments) {
@@ -506,6 +572,7 @@ els.dropZone.addEventListener("drop", (event) => {
   setSelectedFile(file);
 });
 els.play.addEventListener("click", togglePlayback);
+els.scoreCreate.addEventListener("click", requestScore);
 els.audio.addEventListener("play", () => els.play.classList.add("playing"));
 els.audio.addEventListener("pause", () => els.play.classList.remove("playing"));
 els.audio.addEventListener("timeupdate", () => {

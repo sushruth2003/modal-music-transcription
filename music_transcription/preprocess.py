@@ -125,7 +125,7 @@ def process_job(spec: JobSpec) -> dict[str, object]:
     """Run one durable CPU-to-GPU job using only Volume references."""
 
     from music_transcription.beat_grid import BeatGridDetector
-    from music_transcription.transcribe import MuScriptorTranscriber
+    from music_transcription.transcribe import YourMT3Transcriber
 
     job_id = spec["job_id"]
     paths = job_paths(job_id, spec["source_suffix"])
@@ -160,17 +160,43 @@ def process_job(spec: JobSpec) -> dict[str, object]:
         artifact_volume.commit()
 
         update_job(job_id, "transcribing")
-        result = MuScriptorTranscriber().transcribe_artifact.remote(
+        result = YourMT3Transcriber().transcribe_artifact.remote(
             job_id,
             spec["source_suffix"],
             spec["instruments"],
             beat_detection,
         )
-        if spec.get("generate_score", False):
-            update_job(job_id, "rendering", result=result)
-            result = render_score.remote(job_id, spec["source_suffix"])
-        update_job(job_id, "completed", result=result)
-        return result
+        return finish_job(spec, result)
     except Exception as error:
         update_job(job_id, "failed", error=f"{type(error).__name__}: {error}")
         raise
+
+
+def finish_job(spec: JobSpec, result: dict[str, object]) -> dict[str, object]:
+    """Keep successful MIDI available even when optional score engraving fails."""
+    job_id = spec["job_id"]
+    if not spec.get("generate_score", False):
+        update_job(job_id, "completed", result=result)
+        return result
+    update_job(job_id, "rendering", result=result)
+    try:
+        scored = render_score.remote(job_id, spec["source_suffix"])
+    except Exception:
+        import logging
+
+        logging.getLogger(__name__).exception("Optional PDF rendering failed for %s", job_id)
+        update_job(
+            job_id,
+            "completed",
+            result=result,
+            score_state="failed",
+            score_error="The score could not be generated. You can retry or download the MIDI.",
+        )
+        return result
+    update_job(
+        job_id,
+        "completed",
+        result=scored,
+        score_state=scored.get("score", {}).get("status", "completed"),
+    )
+    return scored

@@ -216,8 +216,9 @@ def test_video_playback_serves_extracted_audio(monkeypatch) -> None:
     monkeypatch.setattr(
         api,
         "read_mounted_audio_slice",
-        lambda path, _range, _visible: requested_paths.append(path)
-        or api.ArtifactSlice(b"RIFF", 4, 0, 3, False),
+        lambda path, _range, _visible: (
+            requested_paths.append(path) or api.ArtifactSlice(b"RIFF", 4, 0, 3, False)
+        ),
     )
     client = TestClient(api.create_web_app())
 
@@ -291,7 +292,7 @@ def test_job_page_and_health_are_served() -> None:
     instrument_payload = client.get("/api/instruments").json()
     options = [option for group in instrument_payload["groups"] for option in group["options"]]
     values = [option["value"] for option in options]
-    assert len(values) == len(set(values)) == 35
+    assert len(values) == len(set(values)) == 37
     assert {option["value"] for option in options} >= {
         "acoustic_piano",
         "distorted_electric_guitar",
@@ -316,11 +317,11 @@ def test_job_page_and_health_are_served() -> None:
     assert "MIDI + score" in page.text
     assert "MusicXML" not in page.text
     assert "shared $10 monthly compute pool" in page.text
-    assert "/app.js?v=20260904-6" in page.text
+    assert "/app.js?v=20260906-3" in page.text
     assert "/styles.css?v=20260904-3" in page.text
     how_page = client.get("/how-it-works")
     assert how_page.status_code == 200
-    assert "Align notes to the beat grid" in how_page.text
+    assert "Preserve note timing" in how_page.text
     assert how_page.headers["cache-control"] == "no-cache"
 
 
@@ -409,3 +410,88 @@ def test_benchmark_app_bypasses_public_submission_limit(monkeypatch) -> None:
     response = client.post("/transcriptions")
 
     assert response.status_code == 400
+
+
+def test_completed_empty_score_does_not_advertise_missing_pdf():
+    from music_transcription.storage import initial_job_record, new_job_spec
+
+    record = initial_job_record(new_job_spec("silence.wav", None, generate_score=True))
+    record["state"] = "completed"
+    record["result"] = {
+        "note_count": 0,
+        "score": {"skipped_reason": "No notes were detected, so there is no PDF score to render."},
+    }
+    public = api.public_job_record(record)
+    assert "midi" in public["links"]
+    assert "score_pdf" not in public["links"]
+    assert public["result"]["score"]["skipped_reason"]
+
+
+def test_pdf_request_reuses_completed_midi_and_deduplicates(monkeypatch):
+    record = completed_record()
+    spawned = []
+
+    def update(_job_id, state, **fields):
+        record.update(state=state, **fields)
+        return dict(record)
+
+    monkeypatch.setattr(api, "get_job", lambda _: dict(record))
+    monkeypatch.setattr(api, "update_job", update)
+    monkeypatch.setattr(api, "spawn_score_job", lambda *args: spawned.append(args))
+    client = TestClient(api.create_web_app())
+    first = client.post(f"/transcriptions/{JOB_ID}/score")
+    second = client.post(f"/transcriptions/{JOB_ID}/score")
+    assert first.status_code == second.status_code == 202
+    assert len(spawned) == 1
+    assert first.json()["state"] == "completed"
+    assert first.json()["score_state"] == "pending"
+    assert "midi" in first.json()["links"] and "score_pdf" not in first.json()["links"]
+    assert record["score_attempts"] == 1
+
+
+def test_pdf_request_returns_existing_score_without_spawning(monkeypatch):
+    record = completed_record()
+    record["generate_score"] = True
+    record["result"]["score"] = {"pdf_bytes": 1234}
+    monkeypatch.setattr(api, "get_job", lambda _: record)
+    monkeypatch.setattr(api, "spawn_score_job", lambda *_: pytest.fail("Must reuse existing PDF"))
+    response = TestClient(api.create_web_app()).post(f"/transcriptions/{JOB_ID}/score")
+    assert response.status_code == 200
+    assert response.json()["links"]["score_pdf"].endswith("/score.pdf")
+
+
+@pytest.mark.parametrize(
+    "change,code",
+    [
+        ({"state": "transcribing"}, 409),
+        ({"score_attempts": 3, "score_state": "failed"}, 429),
+        ({"result": {"note_count": 0}}, 422),
+    ],
+)
+def test_pdf_request_rejects_unready_empty_and_excessive_retries(monkeypatch, change, code):
+    record = {**completed_record(), **change}
+    monkeypatch.setattr(api, "get_job", lambda _: record)
+    monkeypatch.setattr(api, "spawn_score_job", lambda *_: pytest.fail("Must not spawn"))
+    assert (
+        TestClient(api.create_web_app()).post(f"/transcriptions/{JOB_ID}/score").status_code == code
+    )
+
+
+def test_pdf_spawn_failure_keeps_transcription_available(monkeypatch):
+    record = completed_record()
+    monkeypatch.setattr(api, "get_job", lambda _: record)
+
+    def update(_job_id, state, **fields):
+        record.update(state=state, **fields)
+        return record
+
+    monkeypatch.setattr(api, "update_job", update)
+    monkeypatch.setattr(
+        api, "spawn_score_job", lambda *_: (_ for _ in ()).throw(RuntimeError("offline"))
+    )
+    response = TestClient(api.create_web_app()).post(f"/transcriptions/{JOB_ID}/score")
+    assert response.status_code == 503
+    assert record["state"] == "completed"
+    assert record["score_state"] == "failed"
+    public = api.public_job_record(record)
+    assert "midi" in public["links"] and "score_pdf" not in public["links"]

@@ -1,7 +1,7 @@
 [project]
 name = "modal-music-transcription"
 version = "0.1.0"
-description = "Durable MuScriptor music transcription on Modal"
+description = "Durable YourMT3+ MoE music transcription on Modal"
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
 license = "MIT"
@@ -9,6 +9,7 @@ keywords = ["audio", "midi", "modal", "music-transcription", "muscriptor"]
 dependencies = [
     "fastapi>=0.116,<1",
     "modal>=1.5.5,<2",
+    "mido==1.3.3",
     "python-multipart>=0.0.20,<1",
 ]
 
@@ -17,7 +18,16 @@ dev = [
     "httpx>=0.28,<1",
     "playwright>=1.55,<2",
     "pytest>=8.4,<9",
+    "pypdf==6.9.1",
     "ruff>=0.12,<1",
+]
+eval = [
+    "pyyaml==6.0.3",
+    "mir-eval==0.8.2",
+    "numpy==2.2.6",
+    "pretty-midi==0.2.11",
+    "scipy==1.17.1",
+    "soundfile==0.13.1",
 ]
 
 [tool.pytest.ini_options]

@@ -1,6 +1,6 @@
 # Auto Transcribe
 
-Transcribe uploaded audio or video into timestamped notes, MIDI, and optional sheet music with MuScriptor Large on Modal.
+Transcribe uploaded audio or video into timestamped notes, MIDI, and optional sheet music with YourMT3+ MoE on Modal.
 
 **[Try Auto Transcribe live →](https://sushruthb03--transcribe.modal.run/)**
 
@@ -9,41 +9,33 @@ required—upload a recording and keep the result URL while the durable job runs
 
 ## Quickstart
 
-You need Python 3.12, [`uv`](https://docs.astral.sh/uv/), a
-[Modal account](https://modal.com/), and a [Hugging Face account](https://huggingface.co/).
+You need Python 3.12, [`uv`](https://docs.astral.sh/uv/), and a
+[Modal account](https://modal.com/). The pinned YourMT3+ MoE snapshot is public;
+the production downloader does not require a Hugging Face secret.
 
 ```bash
-git clone https://github.com/sushruth2003/modal-music-transcription.git music-transcription
-cd music-transcription
-uv sync --dev
+uv sync --dev --group eval
 uv run modal setup
 ```
 
-Accept the gated, non-commercial CC BY-NC terms on the
-[MuScriptor Large model page](https://huggingface.co/MuScriptor/muscriptor-large),
-create a read-only Hugging Face token, and put it in a local `.env` file:
-
-```bash
-cp .env.example .env
-# Edit .env and replace the placeholder with your token.
-uv run modal secret create --from-dotenv .env huggingface-secret
-```
-
-Materialize the pinned MuScriptor and Beat This! weights once, then deploy the
+Materialize the pinned YourMT3+ MoE and Beat This! weights once, then deploy the
 workers and web app:
 
 ```bash
-uv run modal run -m music_transcription.models::download_model
+uv run modal run -m music_transcription.models::download_yourmt3
 uv run modal deploy -m music_transcription.pipeline
 ```
 
 Modal prints the web URL after deployment. Open it to upload a WAV, FLAC, MP3,
 M4A, OGG, MP4, MOV, WebM, or MKV file (up to 100 MB and ten minutes).
-Choose MIDI alone or MIDI plus a printable PDF score. The
+Choose MIDI alone or MIDI plus a printable PDF score. Completed MIDI-only results
+also offer **Create PDF score**, reusing the saved MIDI without another GPU run.
+The
 page also provides source-audio playback, a synthesized note preview, and a
-synchronized piano roll. Instrument conditioning is optional: leave the picker
-empty for auto-detection, or select from MuScriptor's exact supported taxonomy.
-Selected instruments are hard constraints, not descriptive prompts.
+synchronized piano roll. Leave “Keep instruments” empty to retain all detected
+instruments, or select the predicted tracks to keep. This is an output filter;
+it does not condition the model or relabel its predictions. Solo strings and other
+detailed instrument labels are retained, with separate singing and chorus labels.
 
 The app intentionally does not fetch remote URLs. Download a video you own or
 have permission to process, then upload the file; FFmpeg extracts its audio track
@@ -84,8 +76,8 @@ flowchart LR
     subgraph workers["Durable processing workers"]
         job["process_job · CPU<br/>FFmpeg → mono 16 kHz WAV"]
         beat["Beat This · CPU<br/>tempo · meter · downbeats"]
-        gpu["MuScriptor Large · L4<br/>pitch · onset · offset · instrument"]
-        timing["Beat-grid correction<br/>tempo · bars · note timing"]
+        gpu["YourMT3+ MoE · L4<br/>pitch · onset · offset · instrument"]
+        timing["MIDI metadata<br/>tempo · meter · original note timing"]
         score["MuseScore · CPU · optional<br/>MIDI → PDF draft"]
     end
 
@@ -126,7 +118,7 @@ sequenceDiagram
     participant Jobs as Job Dict
     participant Flow as process_job CPU worker
     participant Beat as Beat This CPU worker
-    participant GPU as MuScriptor L4 worker
+    participant GPU as YourMT3+ MoE L4 worker
     participant Score as MuseScore CPU worker
     participant Files as Artifact Volume
 
@@ -145,7 +137,7 @@ sequenceDiagram
         Beat-->>Flow: Validated beat grid or safe fallback
         Flow->>Jobs: transcribing
         Flow->>GPU: Transcribe audio with optional instrument hints
-        GPU->>GPU: Correct timing against the beat grid
+        GPU->>GPU: Attach tempo/meter; preserve note timing
         GPU->>Files: Commit events, MIDI, and metrics
 
         opt PDF score requested
@@ -187,23 +179,29 @@ while a CPU worker extracts and normalizes the recording's audio, a second CPU
 worker detects its beat grid, an L4 worker transcribes it, and an optional CPU
 worker renders notation. Those workers exchange Volume paths rather than media
 bytes. FFmpeg and Beat This! do not occupy an L4; MuseScore also runs in its own
-CPU image. MuScriptor's checkpoint and the exact Beat This! `final0` checkpoint
+CPU image. YourMT3+ MoE's checkpoint and the exact Beat This! `final0` checkpoint
 live on a separate read-only Volume. Each model is loaded by `@modal.enter` once
 per warm worker. GPU inference still has `min_containers=0` and
 `max_containers=1`, so it scales to zero and only one GPU job runs at a time.
 
-Beat detection is best-effort. Recordings that are too short or do not fit a
-steady tempo continue through transcription with MuScriptor's placeholder MIDI
-tempo. When a grid is usable, the exported MIDI receives its measured tempo and
-time signature, bar lines are aligned to the first downbeat, and MuScriptor's
-small global onset lag is corrected in both MIDI and browser events. Source audio
-is served with HTTP byte ranges, so the browser can seek without downloading the
-recording again. The timing summary and any fallback reason are recorded in
-`metrics.json`.
+Beat detection is best-effort. Recordings without a steady grid use 120 BPM as
+MIDI metadata while preserving predicted note times. A usable grid supplies tempo
+and meter. Notes in MIDI and browser events share the original audio clock;
+YourMT3+ MoE does not receive the old MuScriptor onset correction or bar padding.
+Source audio supports HTTP byte ranges for seeking. Timing and fallback reasons
+are recorded in `metrics.json`. See [Beat metadata](BEAT_GRID.md).
 
-See [Beat-grid correction](BEAT_GRID.md) for the validation thresholds,
-onset and bar-offset semantics, checkpoint lifecycle, fallback policy, and
-deployment steps.
+The production model uses the same FP32 decode, batch size 8, and pinned checkpoint
+as the architecture evaluation. Weights are SHA-256 checked on download and worker
+startup. Its isolated Python 3.11 image uses 2 CPU cores and 12 GiB requested memory
+alongside an L4. Model code is built into the image; weights remain on the read-only
+model Volume. Legacy MuScriptor pins/downloader remain available for historical
+benchmarks and rollback, but the deployed pipeline only invokes YourMT3+ MoE.
+
+Before deployment, run `uv run modal run -m music_transcription.release_check` to
+exercise the new worker graph without replacing the live app (bounded GPU estimate
+under $0.25). Local fixtures require the existing frozen quality-suite data. See
+[release validation](YOURMT3_RELEASE.md) for results and rollback instructions.
 
 The durable artifacts for each job are:
 
@@ -224,7 +222,7 @@ jobs/{job_id}/
 | FastAPI ASGI Function | Accept uploads, return job handles, and serve status/artifacts |
 | CPU `process_job` Function | Extract and normalize audio, then coordinate the workers |
 | CPU Beat This! class | Keep the beat tracker warm and detect tempo, meter, and downbeats |
-| L4 GPU class | Keep MuScriptor resident while warm and run inference |
+| L4 GPU class | Keep YourMT3+ MoE resident while warm and run inference |
 | CPU score Function | Import MIDI into MuseScore and export a PDF draft |
 | Model Volume | Persist both static, pinned checkpoints independently of containers |
 | Artifact Volume | Persist source audio and generated files across every stage |
@@ -235,8 +233,11 @@ jobs/{job_id}/
 The browser turns paired note-start/note-end events into the piano roll. “Source
 audio” plays the uploaded audio or the normalized track extracted from a video;
 “Transcription preview” schedules a lightweight Web Audio rendition of the detected
-notes, so M2 does not need another server-side synthesis worker. MuScriptor Large is
+notes, so M2 does not need another server-side synthesis worker. YourMT3+ MoE is
 the underlying transcription model, not the name of the application.
+
+See [PDF flow and probes](PDF_FLOW.md) for the pinned MuseScore Studio engine,
+PDF validation, on-demand score API, and CPU-only regression probes.
 
 ## Public hobby deployment
 
